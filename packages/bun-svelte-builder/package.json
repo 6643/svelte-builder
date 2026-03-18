@@ -1,0 +1,22 @@
+{
+    "name": "bun-svelte-builder",
+    "bin": {
+        "bun-svelte-builder": "./src/cli.ts"
+    },
+    "type": "module",
+    "module": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./runtime": "./src/runtime.ts",
+    "./build": "./src/build.ts",
+    "./package.json": "./package.json"
+  },
+    "files": [
+        "src",
+        "README.md",
+        "package.json"
+    ],
+    "peerDependencies": {
+        "svelte": "next"
+    }
+}

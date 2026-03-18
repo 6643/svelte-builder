@@ -1,0 +1,127 @@
+# svelte5-bun-demo
+
+`packages/bun-svelte-builder` 是可复用的 Bun + Svelte 5 生产构建预设。
+
+`examples` 是演示如何消费该预设的独立 workspace 示例包, 目录内保留业务源码与配置, 当前包含 `src/`、`assets/`、`bun-svelte-builder.config.ts` 和 `package.json`。入口由构建器根据 `appComponent` 自动生成, 不再需要手写 `main.ts`。
+
+统一配置文件名是 `bun-svelte-builder.config.ts`。
+
+这个 builder 只支持 SPA:
+
+- 固定 SPA 入口由 `appComponent` 指定, 默认 `src/App.svelte`
+- 不支持多页面
+- `entrypoint` 已删除
+- `appComponent` 默认 `src/App.svelte`
+- 配置文件所在目录会自动作为项目根, `rootDir` 是内部推导值, 不需要手填
+
+HTML 一律使用内置 shell:
+
+- build/dev 都不读取 `src/index.html`
+- `htmlTemplate` 已删除
+- 默认根容器固定为 `<main id="app"></main>`
+- 默认标题固定为 `Bun Svelte Builder`
+
+公共配置与默认值:
+
+| 配置 | 默认值 | 说明 |
+| --- | --- | --- |
+| `appComponent` | `"src/App.svelte"` | SPA 根组件, build/dev 都会据此生成内部 bootstrap |
+| `mountId` | `"app"` | 只支持 DOM `id`, build/dev 都会把它写进内置 shell |
+| `appTitle` | `"Bun Svelte Builder"` | 内置 shell 的 `<title>` |
+| `assetsDir` | `"assets"` | 可选静态资源目录, dev 直接读, build 复制到 `dist/assets/` |
+| `outDir` | `"dist"` | 生产输出目录 |
+| `port` | `3000` | dev server 监听端口 |
+
+`appComponent` 是可选配置:
+
+```ts
+import { defineSvelteConfig } from "bun-svelte-builder";
+
+export default defineSvelteConfig({
+    appComponent: "src/App.svelte",
+    appTitle: "Bun Svelte Builder",
+});
+```
+
+`appComponent` 不配置时默认就是 `src/App.svelte`。
+
+`assetsDir` 是可选配置:
+
+```ts
+import { defineSvelteConfig } from "bun-svelte-builder";
+
+export default defineSvelteConfig({
+    assetsDir: "assets",
+    appTitle: "Bun Svelte Builder",
+});
+```
+
+`assetsDir` 不配置时默认就是 `assets`。
+
+最小目录形态:
+
+```text
+examples/
+  src/
+    App.svelte
+  assets/
+  bun-svelte-builder.config.ts
+```
+
+静态资源语义固定为 `/assets/*`:
+
+- dev: 直接从 `<rootDir>/<assetsDir>/*` 读取
+- build: 原样复制到 `<outDir>/assets/*`
+- 不参与 hash, 不改名, 不注入到入口产物报告
+- 示例页面当前直接引用 `/assets/panel-mark.svg`
+
+构建输出示例:
+
+- `bun run build`
+
+```text
+Entry assets
+
+File                     Size     Gzip
+f35ba27158e87d2b.js   4.1 KiB  1.9 KiB
+d0c5e18487a809dd.css  4.6 KiB  1.4 KiB
+index.html              274 B    217 B
+```
+
+- `bun dev`
+
+```text
+Recompiled assets
+
+File                         Time                 Size     Gzip
+src/lazy/ButtonDemo.svelte   2026-03-18 11:11:11  4.1 KiB  1.9 KiB
+```
+
+生产构建采用单写者 `dist` 发布:
+
+- 最终产物直接写入 `examples/dist/`
+- 同一输出目录只允许一个构建进程写入
+- 若检测到失效的 `dist.lock`, 构建会自动回收后继续
+
+安装依赖:
+
+```bash
+bun install
+```
+
+从仓库根目录运行示例:
+
+```bash
+bun run dev
+bun run build
+```
+
+直接运行示例包:
+
+```bash
+cd examples
+bun run dev
+bun run build
+```
+
+示例配置文件见 [examples/bun-svelte-builder.config.ts](/home/_/files/11/svelte5-bun-demo/examples/bun-svelte-builder.config.ts)。

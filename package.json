@@ -1,0 +1,25 @@
+{
+    "name": "svelte5-bun-demo",
+    "module": "index.ts",
+    "type": "module",
+    "private": true,
+    "workspaces": [
+        "packages/*",
+        "examples"
+    ],
+    "dependencies": {
+        "bun-svelte-builder": "workspace:*"
+    },
+    "devDependencies": {
+        "@types/bun": "latest",
+        "svelte": "next"
+    },
+    "peerDependencies": {
+        "typescript": "^5.9.3"
+    },
+    "scripts": {
+        "build": "bun run build.ts",
+        "dev": "bun --hot server.ts",
+        "test": "bun test"
+    }
+}
