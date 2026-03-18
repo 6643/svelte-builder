@@ -17,13 +17,18 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
 import { createServer } from "node:net";
-import { buildProduction } from "../build";
+import { request } from "node:http";
+import type { BuildSvelteOptions } from "../packages/bun-svelte-builder/src/build";
 
 const createdDirs: string[] = [];
 const EXAMPLE_ROOT = join(process.cwd(), "examples");
 const EXAMPLE_SRC = join(EXAMPLE_ROOT, "src");
 const EXAMPLE_ASSETS = join(EXAMPLE_ROOT, "assets");
 let devTestChain: Promise<void> = Promise.resolve();
+
+const importRootBuildModule = () => import("../build");
+const importRootServerModule = () => import("../server");
+const buildProduction = async (options?: BuildSvelteOptions) => (await importRootBuildModule()).buildProduction(options);
 
 afterEach(() => {
     for (const dir of createdDirs.splice(0)) {
@@ -68,6 +73,34 @@ const allocateFreePort = async (): Promise<number> =>
                 resolve(port);
             });
         });
+    });
+
+const requestDevServerPath = async (port: number, path: string): Promise<{ body: string; status: number }> =>
+    new Promise((resolve, reject) => {
+        const req = request(
+            {
+                host: "127.0.0.1",
+                method: "GET",
+                path,
+                port,
+            },
+            (res) => {
+                const chunks: Buffer[] = [];
+
+                res.on("data", (chunk) => {
+                    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+                });
+                res.on("end", () => {
+                    resolve({
+                        body: Buffer.concat(chunks).toString("utf8"),
+                        status: res.statusCode ?? 0,
+                    });
+                });
+            },
+        );
+
+        req.on("error", reject);
+        req.end();
     });
 
 const createExpectedShortHash = (content: string, length: number): string =>
@@ -274,6 +307,16 @@ test("buildProduction emits hashed js, hashed css, and index.html that reference
     expect(entryJsContents).toMatch(/class=\"_[a-z0-9]+\"/);
 });
 
+test("root build and server entrypoints are importable wrapper modules", async () => {
+    const buildModule = await importRootBuildModule();
+
+    expect(typeof buildModule.buildProduction).toBe("function");
+
+    const serverModule = await importRootServerModule();
+
+    expect(typeof serverModule.serveDevelopment).toBe("function");
+});
+
 test("real demo app emits multiple lazy-loaded js chunks", async () => {
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsp-app-"));
     createdDirs.push(rootDir);
@@ -329,9 +372,56 @@ test("bootstrap module source defaults appComponent and mounts to the configured
     expect(customSource).toContain('document.getElementById("root")');
 });
 
+test("dev watcher dedupes repeated events for the same file within the debounce window", async () => {
+    const { shouldProcessDevWatchEvent } = await import("../packages/bun-svelte-builder/src/dev.ts");
+
+    expect(shouldProcessDevWatchEvent(new Map(), "src/App.svelte", 1000)).toBe(true);
+
+    const recentEvents = new Map<string, number>([["src/App.svelte", 1000]]);
+
+    expect(shouldProcessDevWatchEvent(recentEvents, "src/App.svelte", 1005)).toBe(false);
+    expect(shouldProcessDevWatchEvent(recentEvents, "src/helper.js", 1005)).toBe(true);
+    expect(shouldProcessDevWatchEvent(recentEvents, "src/App.svelte", 1200)).toBe(true);
+});
+
+test("dev watcher surfaces non-trivial errors and ignores transient missing-file races", async () => {
+    const { formatDevWatcherIssue } = await import("../packages/bun-svelte-builder/src/dev.ts");
+
+    expect(formatDevWatcherIssue("compile", Object.assign(new Error("gone"), { code: "ENOENT" }))).toBeUndefined();
+    expect(formatDevWatcherIssue("watch setup", new Error("permission denied"))).toContain("watch setup");
+    expect(formatDevWatcherIssue("watch setup", new Error("permission denied"))).toContain("permission denied");
+});
+
+test("dev watcher runtime error handler reports non-trivial watcher failures", async () => {
+    const { attachDevWatcherErrorHandler } = await import("../packages/bun-svelte-builder/src/dev.ts");
+    const warnings: string[] = [];
+    const handlers = new Map<string, (error: unknown) => void>();
+    const watcher = {
+        on(event: string, handler: (error: unknown) => void) {
+            handlers.set(event, handler);
+            return undefined;
+        },
+    };
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+        warnings.push(args.map((value) => String(value)).join(" "));
+    };
+
+    try {
+        attachDevWatcherErrorHandler(watcher, "watch runtime for src");
+        handlers.get("error")?.(new Error("watch backend failed"));
+    } finally {
+        console.warn = originalWarn;
+    }
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("watch runtime for src");
+    expect(warnings[0]).toContain("watch backend failed");
+});
+
 test("runtime module source embeds the configured mount id and helper behavior", async () => {
     const { createRuntimeModuleSource, getMountTarget } = await import("../packages/bun-svelte-builder/src/runtime.ts");
-    const runtimeTarget = { id: "app" } as unknown as Element;
+    const runtimeTarget = { id: "app" };
     const scope = {
         getElementById: (id: string) => (id === "app" ? runtimeTarget : null),
     };
@@ -460,6 +550,7 @@ test("formatBuildReport lists entry asset sizes and gzip sizes", async () => {
     createdDirs.push(rootDir);
 
     mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
 
     writeFileSync(
         join(rootDir, "main.ts"),
@@ -879,6 +970,46 @@ test("runConfiguredBuild copies configured assets into dist/assets and keeps the
     expect(html).toMatch(new RegExp(`<script[^>]*src="/${result.value.jsFile}"`));
 });
 
+test("buildSvelte copies assets from the default assets directory when assetsDir is omitted", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-default-assets-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets", "icons"), { recursive: true });
+
+    writeFileSync(
+        join(rootDir, "main.ts"),
+        [
+            'import { mount } from "svelte";',
+            'import App from "./src/App.svelte";',
+            'mount(App, { target: document.getElementById("app")! });',
+        ].join("\n"),
+    );
+
+    writeFileSync(
+        join(rootDir, "src", "App.svelte"),
+        ["<h1>default assets</h1>", "", "<style>", "  h1 { color: teal; }", "</style>"].join("\n"),
+    );
+
+    writeFileSync(join(rootDir, "assets", "logo.svg"), "logo-default");
+    writeFileSync(join(rootDir, "assets", "icons", "check.txt"), "default-check");
+
+    const { buildSvelte } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const result = await buildSvelte({ rootDir });
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    const distAssetsDir = join(rootDir, "dist", "assets");
+
+    expect(existsSync(join(distAssetsDir, "logo.svg"))).toBe(true);
+    expect(readFileSync(join(distAssetsDir, "logo.svg"), "utf8")).toBe("logo-default");
+    expect(readFileSync(join(distAssetsDir, "icons", "check.txt"), "utf8")).toBe("default-check");
+});
+
 test("runConfiguredBuild copies assets from an absolute assetsDir path", async () => {
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-assets-absolute-root-"));
     const assetsRoot = mkdtempSync(join(process.cwd(), ".tmp-bsb-assets-absolute-dir-"));
@@ -1287,6 +1418,60 @@ test("runConfiguredDevServer serves the built-in html shell and injects the impo
     expect(html).toContain('<script type="importmap">');
     }));
 
+test("runConfiguredDevServer escapes appTitle in the dev html shell", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-escaped-title-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(
+        join(rootDir, "main.ts"),
+        [
+            'import { mount } from "svelte";',
+            'import App from "./src/App.svelte";',
+            'mount(App, { target: document.getElementById("app")! });',
+        ].join("\n"),
+    );
+
+    writeFileSync(
+        join(rootDir, "src", "App.svelte"),
+        ["<h1>escaped title</h1>", "", "<style>", "  h1 { color: coral; }", "</style>"].join("\n"),
+    );
+
+    writeFileSync(
+        join(rootDir, "bun-svelte-builder.config.ts"),
+        [
+            'import { defineSvelteConfig } from "bun-svelte-builder";',
+            "",
+            "export default defineSvelteConfig({",
+            '    appTitle: "<script>alert(1)</script> & demo",',
+            `    port: ${devPort},`,
+            "});",
+        ].join("\n"),
+    );
+
+    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    const response = await fetch(`http://127.0.0.1:${result.value.port}/`);
+    const html = await response.text();
+
+    await result.value.stop();
+
+    expect(response.ok).toBe(true);
+    expect(html).toContain("<title>&lt;script&gt;alert(1)&lt;/script&gt; &amp; demo</title>");
+    expect(html).not.toContain("<title><script>alert(1)</script> & demo</title>");
+    expect(html).toContain('<main id="app"></main>');
+    expect(html).toContain('<script type="importmap">');
+    }));
+
 test("runConfiguredDevServer serves a generated bootstrap module without main.ts", async () =>
     runSequentialDevTest(async () => {
     const devPort = await allocateFreePort();
@@ -1516,6 +1701,95 @@ test("runConfiguredDevServer logs a recompiled asset report for changed componen
     }
     }));
 
+test("runConfiguredDevServer logs only the changed component and excludes untouched sibling files", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-single-file-report-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src", "lazy"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(
+        join(rootDir, "main.ts"),
+        [
+            'import { mount } from "svelte";',
+            'import App from "./src/App.svelte";',
+            'mount(App, { target: document.getElementById("app")! });',
+        ].join("\n"),
+    );
+
+    writeFileSync(
+        join(rootDir, "src", "App.svelte"),
+        [
+            "<script>",
+            '  import ButtonDemo from "./lazy/ButtonDemo.svelte";',
+            '  import CardDemo from "./lazy/CardDemo.svelte";',
+            "</script>",
+            "",
+            "<ButtonDemo />",
+            "<CardDemo />",
+        ].join("\n"),
+    );
+
+    writeFileSync(join(rootDir, "src", "lazy", "ButtonDemo.svelte"), "<button>one</button>");
+    writeFileSync(join(rootDir, "src", "lazy", "CardDemo.svelte"), "<section>two</section>");
+
+    writeFileSync(
+        join(rootDir, "bun-svelte-builder.config.ts"),
+        [
+            'import { defineSvelteConfig } from "bun-svelte-builder";',
+            "",
+            "export default defineSvelteConfig({",
+            `    port: ${devPort},`,
+            "});",
+        ].join("\n"),
+    );
+
+    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    const originalLog = console.log;
+    const logs: string[] = [];
+    console.log = (...args: unknown[]) => {
+        logs.push(args.map((value) => String(value)).join(" "));
+    };
+
+    try {
+        writeFileSync(join(rootDir, "src", "lazy", "ButtonDemo.svelte"), "<button>updated</button>");
+
+        await new Promise<void>((resolve, reject) => {
+            const deadline = Date.now() + 4000;
+            const timer = setInterval(() => {
+                const log = logs.join("\n");
+                if (log.includes("Recompiled assets") && log.includes("src/lazy/ButtonDemo.svelte")) {
+                    clearInterval(timer);
+                    resolve();
+                    return;
+                }
+
+                if (Date.now() > deadline) {
+                    clearInterval(timer);
+                    reject(new Error(`Timed out waiting for single-file compile report. Logs:\n${log}`));
+                }
+            }, 25);
+        });
+
+        const log = logs.join("\n");
+
+        expect(log).toContain("src/lazy/ButtonDemo.svelte");
+        expect(log).not.toContain("src/lazy/CardDemo.svelte");
+        expect(log).not.toContain("src/App.svelte");
+    } finally {
+        console.log = originalLog;
+        await result.value.stop();
+    }
+    }));
+
 test("runConfiguredDevServer logs a recompiled asset report for changed JavaScript helpers", async () =>
     runSequentialDevTest(async () => {
     const devPort = await allocateFreePort();
@@ -1609,6 +1883,266 @@ test("runConfiguredDevServer logs a recompiled asset report for changed JavaScri
         expect(log).not.toContain("Total");
     } finally {
         console.log = originalLog;
+        await result.value.stop();
+    }
+    }));
+
+test("runConfiguredDevServer watches directories whose names only contain excluded directory substrings", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-dist-substring-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src", "distilled"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(
+        join(rootDir, "src", "App.svelte"),
+        [
+            "<script>",
+            '  import { label } from "./distilled/helper.js";',
+            "</script>",
+            "",
+            "<h1>{label}</h1>",
+        ].join("\n"),
+    );
+    writeFileSync(join(rootDir, "src", "distilled", "helper.js"), 'export const label = "before";');
+
+    writeFileSync(
+        join(rootDir, "bun-svelte-builder.config.ts"),
+        [
+            'import { defineSvelteConfig } from "bun-svelte-builder";',
+            "",
+            "export default defineSvelteConfig({",
+            `    port: ${devPort},`,
+            "});",
+        ].join("\n"),
+    );
+
+    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    const originalLog = console.log;
+    const logs: string[] = [];
+    console.log = (...args: unknown[]) => {
+        logs.push(args.map((value) => String(value)).join(" "));
+    };
+
+    try {
+        writeFileSync(join(rootDir, "src", "distilled", "helper.js"), 'export const label = "after";');
+
+        await new Promise<void>((resolve, reject) => {
+            const deadline = Date.now() + 4000;
+            const timer = setInterval(() => {
+                const log = logs.join("\n");
+                if (log.includes("Recompiled assets") && log.includes("src/distilled/helper.js")) {
+                    clearInterval(timer);
+                    resolve();
+                    return;
+                }
+
+                if (Date.now() > deadline) {
+                    clearInterval(timer);
+                    reject(new Error(`Timed out waiting for substring directory compile report. Logs:\n${log}`));
+                }
+            }, 25);
+        });
+
+        const response = await fetch(`http://127.0.0.1:${result.value.port}/src/distilled/helper.js`);
+        const source = await response.text();
+        const log = logs.join("\n");
+
+        expect(response.ok).toBe(true);
+        expect(source).toContain('export const label = "after"');
+        expect(log).toContain("src/distilled/helper.js");
+    } finally {
+        console.log = originalLog;
+        await result.value.stop();
+    }
+    }));
+
+test("runConfiguredDevServer watches directories created after startup", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-new-directory-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(
+        join(rootDir, "main.ts"),
+        [
+            'import { mount } from "svelte";',
+            'import App from "./src/App.svelte";',
+            'mount(App, { target: document.getElementById("app")! });',
+        ].join("\n"),
+    );
+
+    writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>new directories</h1>");
+
+    writeFileSync(
+        join(rootDir, "bun-svelte-builder.config.ts"),
+        [
+            'import { defineSvelteConfig } from "bun-svelte-builder";',
+            "",
+            "export default defineSvelteConfig({",
+            `    port: ${devPort},`,
+            "});",
+        ].join("\n"),
+    );
+
+    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    const originalLog = console.log;
+    const logs: string[] = [];
+    console.log = (...args: unknown[]) => {
+        logs.push(args.map((value) => String(value)).join(" "));
+    };
+
+    try {
+        mkdirSync(join(rootDir, "src", "generated"), { recursive: true });
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        writeFileSync(join(rootDir, "src", "generated", "helper.js"), 'export const label = "first";');
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        writeFileSync(join(rootDir, "src", "generated", "helper.js"), 'export const label = "second";');
+
+        await new Promise<void>((resolve, reject) => {
+            const deadline = Date.now() + 4000;
+            const timer = setInterval(() => {
+                const log = logs.join("\n");
+                if (log.includes("Recompiled assets") && log.includes("src/generated/helper.js")) {
+                    clearInterval(timer);
+                    resolve();
+                    return;
+                }
+
+                if (Date.now() > deadline) {
+                    clearInterval(timer);
+                    reject(new Error(`Timed out waiting for new-directory compile report. Logs:\n${log}`));
+                }
+            }, 25);
+        });
+
+        const response = await fetch(`http://127.0.0.1:${result.value.port}/src/generated/helper.js`);
+        const source = await response.text();
+        const log = logs.join("\n");
+
+        expect(response.ok).toBe(true);
+        expect(source).toContain('export const label = "second"');
+        expect(log).toContain("src/generated/helper.js");
+    } finally {
+        console.log = originalLog;
+        await result.value.stop();
+    }
+    }));
+
+test("runConfiguredDevServer rejects escaped project source paths and still serves valid source files", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-source-boundary-"));
+    const escapedSourceRoot = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-source-boundary-outside-"));
+    const escapedSourcePath = join(escapedSourceRoot, "leak.js");
+    createdDirs.push(rootDir, escapedSourceRoot);
+
+    writeConfiguredDevFixture(rootDir, { portLine: `    port: ${devPort},` });
+    writeFileSync(join(rootDir, "src", "helper.js"), 'export const helper = "safe";');
+    writeFileSync(escapedSourcePath, 'export const leaked = "outside root";');
+    symlinkSync(escapedSourcePath, join(rootDir, "src", "escaped.js"));
+
+    const leakedPackageJson = readFileSync(join(process.cwd(), "package.json"), "utf8");
+    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    try {
+        for (const pathname of ["/../package.json", "/%2e%2e/package.json", "/../App.svelte", "/%2e%2e/App.svelte"]) {
+            const { body, status } = await requestDevServerPath(result.value.port, pathname);
+
+            expect(status).toBe(404);
+            expect(body).not.toContain(leakedPackageJson);
+        }
+
+        const escapedResponse = await requestDevServerPath(result.value.port, "/src/escaped.js");
+
+        expect(escapedResponse.status).toBe(404);
+        expect(escapedResponse.body).not.toContain('export const leaked = "outside root";');
+
+        const missingSourceResponse = await fetch(`http://127.0.0.1:${result.value.port}/src/missing.js`);
+        const missingSourceBody = await missingSourceResponse.text();
+
+        expect(missingSourceResponse.status).toBe(404);
+        expect(missingSourceBody).not.toContain(rootDir);
+        expect(missingSourceBody).not.toContain(escapedSourceRoot);
+
+        const validResponse = await fetch(`http://127.0.0.1:${result.value.port}/src/helper.js`);
+        const validBody = await validResponse.text();
+
+        expect(validResponse.status).toBe(200);
+        expect(validBody).toContain('export const helper = "safe";');
+    } finally {
+        await result.value.stop();
+    }
+    }));
+
+test("runConfiguredDevServer rejects escaped node_modules paths and still serves valid node_modules files", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-node-modules-boundary-"));
+    const escapedNodeModulesRoot = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-node-modules-boundary-outside-"));
+    const escapedNodeModulesTarget = join(escapedNodeModulesRoot, "leak.js");
+    createdDirs.push(rootDir, escapedNodeModulesRoot);
+
+    writeConfiguredDevFixture(rootDir, { portLine: `    port: ${devPort},` });
+    mkdirSync(join(rootDir, "node_modules", "svelte"), { recursive: true });
+    writeFileSync(join(rootDir, "node_modules", "svelte", "package.json"), '{"name":"svelte"}');
+    writeFileSync(escapedNodeModulesTarget, 'export const leaked = "outside node_modules";');
+    symlinkSync(escapedNodeModulesTarget, join(rootDir, "node_modules", "escaped.js"));
+
+    const leakedPackageJson = readFileSync(join(process.cwd(), "package.json"), "utf8");
+    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    try {
+        for (const pathname of ["/_node_modules/../../package.json", "/_node_modules/%2e%2e/%2e%2e/package.json"]) {
+            const { body, status } = await requestDevServerPath(result.value.port, pathname);
+
+            expect(status).toBe(404);
+            expect(body).not.toContain(leakedPackageJson);
+        }
+
+        const missingResponse = await requestDevServerPath(result.value.port, "/_node_modules/missing.js");
+
+        expect(missingResponse.status).toBe(404);
+        expect(missingResponse.body).not.toContain("missing.js");
+
+        const escapedResponse = await requestDevServerPath(result.value.port, "/_node_modules/escaped.js");
+
+        expect(escapedResponse.status).toBe(404);
+        expect(escapedResponse.body).not.toContain('export const leaked = "outside node_modules";');
+
+        const validResponse = await fetch(`http://127.0.0.1:${result.value.port}/_node_modules/svelte/package.json`);
+        const validBody = await validResponse.text();
+
+        expect(validResponse.status).toBe(200);
+        expect(validBody).toContain('"name":"svelte"');
+    } finally {
         await result.value.stop();
     }
     }));

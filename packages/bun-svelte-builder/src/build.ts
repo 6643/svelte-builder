@@ -680,7 +680,7 @@ export const buildSvelte = async (options: BuildSvelteOptions = {}): Promise<Res
     const buildNonce = createBuildNonce();
     const stageDir = createStageDir(rootDir, buildNonce);
     const tempOutDir = createTempOutDir(outDir, buildNonce);
-    const assetsDir = await resolveConfiguredAssetsDir(rootDir, options.assetsDir);
+    const assetsDir = await resolveConfiguredAssetsDir(rootDir, options.assetsDir ?? "assets");
     let lockPath: string | null = null;
     let published = false;
 

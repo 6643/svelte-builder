@@ -1,10 +1,16 @@
 import { join } from "node:path";
-import { runConfiguredDevServer } from "bun-svelte-builder";
+import { runConfiguredDevServer } from "./packages/bun-svelte-builder/src/index";
 
-const result = await runConfiguredDevServer(join(import.meta.dir, "examples"));
-if (!result.ok) {
-    console.error(result.error);
-    process.exit(1);
+const DEFAULT_EXAMPLE_ROOT = join(import.meta.dir, "examples");
+
+export const serveDevelopment = () => runConfiguredDevServer(DEFAULT_EXAMPLE_ROOT);
+
+if (import.meta.main) {
+    const result = await serveDevelopment();
+    if (!result.ok) {
+        console.error(result.error);
+        process.exit(1);
+    }
+
+    console.log(`Serving http://localhost:${result.value.port}`);
 }
-
-console.log(`Serving http://localhost:${result.value.port}`);

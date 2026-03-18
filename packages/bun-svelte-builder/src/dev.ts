@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { readdirSync, statSync, watch } from "node:fs";
+import { lstatSync, readdirSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { gzipSync } from "node:zlib";
 import { compile } from "svelte/compiler";
@@ -14,6 +14,7 @@ export type DevServerHandle = {
 };
 
 const EXCLUDED_DIRS = ["node_modules", ".git", "dist"];
+const DEV_WATCH_DEBOUNCE_MS = 100;
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 
 const fail = (error: string): Result<never> => ({ ok: false, error });
@@ -40,13 +41,15 @@ const escapeHtml = (value: string): string =>
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
 
+const createNotFoundResponse = (): Response => new Response("Not Found", { status: 404 });
+
 const createDevHtmlShell = (importMapScript: string, mountId: string, appTitle: string): string =>
     [
         "<!DOCTYPE html>",
         '<html lang="en">',
         "<head>",
         '    <meta charset="UTF-8">',
-        `    <title>${appTitle}</title>`,
+        `    <title>${escapeHtml(appTitle)}</title>`,
         `    ${importMapScript}`,
         "</head>",
         "<body>",
@@ -72,6 +75,64 @@ const createRecompiledAssetReport = (modulePath: string, contents: string): stri
 
 const logRecompiledAsset = (modulePath: string, contents: string): void => {
     console.log(createRecompiledAssetReport(modulePath, contents));
+};
+
+const isCompilableDevModule = (filePath: string): boolean =>
+    filePath.endsWith(".svelte") || filePath.endsWith(".ts") || filePath.endsWith(".js");
+
+const isExcludedWatchDirectory = (dirName: string): boolean => EXCLUDED_DIRS.includes(dirName);
+
+const getWatcherErrorCode = (error: unknown): string | undefined =>
+    typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : undefined;
+
+const isIgnorableDevWatcherError = (error: unknown): boolean => {
+    const errorCode = getWatcherErrorCode(error);
+    return errorCode === "ENOENT" || errorCode === "ENOTDIR";
+};
+
+export const formatDevWatcherIssue = (context: string, error: unknown): string | undefined => {
+    if (isIgnorableDevWatcherError(error)) {
+        return undefined;
+    }
+
+    return `[bun-svelte-builder] ${context}: ${getErrorMessage(error)}`;
+};
+
+const reportDevWatcherIssue = (context: string, error: unknown): void => {
+    const issue = formatDevWatcherIssue(context, error);
+    if (issue !== undefined) {
+        console.warn(issue);
+    }
+};
+
+export const attachDevWatcherErrorHandler = (
+    watcher: { on: (event: string, handler: (error: unknown) => void) => unknown },
+    context: string,
+): void => {
+    watcher.on("error", (error) => {
+        reportDevWatcherIssue(context, error);
+    });
+};
+
+export const shouldProcessDevWatchEvent = (
+    recentEvents: Map<string, number>,
+    modulePath: string,
+    now = Date.now(),
+): boolean => {
+    const previous = recentEvents.get(modulePath);
+    recentEvents.set(modulePath, now);
+
+    if (previous !== undefined && now - previous < DEV_WATCH_DEBOUNCE_MS) {
+        return false;
+    }
+
+    for (const [path, timestamp] of recentEvents) {
+        if (now - timestamp >= DEV_WATCH_DEBOUNCE_MS) {
+            recentEvents.delete(path);
+        }
+    }
+
+    return true;
 };
 
 const compileChangedDevAsset = async (rootDir: string, modulePath: string): Promise<void> => {
@@ -111,6 +172,8 @@ type DevReloadHub = {
 const createDevReloadHub = (watchDir: string): DevReloadHub => {
     const watchers: { close: () => void }[] = [];
     const listeners = new Set<(data: string) => void>();
+    const recentEvents = new Map<string, number>();
+    const watchedDirs = new Set<string>();
 
     const stop = (): void => {
         watchers.forEach((watcher) => watcher.close());
@@ -125,38 +188,59 @@ const createDevReloadHub = (watchDir: string): DevReloadHub => {
     };
 
     const watchRecursive = (dir: string) => {
+        if (watchedDirs.has(dir)) {
+            return;
+        }
+
         try {
-            watchers.push(
-                watch(dir, () => {
-                    notify("reload");
+            watchedDirs.add(dir);
+            const watcher = watch(dir, (_eventType, filename) => {
+                    if (typeof filename !== "string" || filename.length === 0) {
+                        notify("reload");
+                        return;
+                    }
+
                     try {
-                        for (const changedFile of readdirSync(dir)) {
-                            const modulePath = join(dir, changedFile);
-                            if (!statSync(modulePath).isFile()) {
-                                continue;
+                        const modulePath = join(dir, filename);
+                        const entry = lstatSync(modulePath);
+                        if (entry.isDirectory()) {
+                            if (!isExcludedWatchDirectory(filename) && !filename.startsWith(".")) {
+                                watchRecursive(modulePath);
                             }
-
-                            if (!changedFile.endsWith(".svelte") && !changedFile.endsWith(".ts") && !changedFile.endsWith(".js")) {
-                                continue;
-                            }
-
-                            const relativePath = relative(watchDir, modulePath);
-                            if (relativePath.startsWith("..") || relativePath.length === 0) {
-                                continue;
-                            }
-
-                            void compileChangedDevAsset(watchDir, relativePath);
+                            return;
                         }
-                    } catch {}
-                }),
-            );
+
+                        if (!entry.isFile()) {
+                            return;
+                        }
+
+                        const relativePath = relative(watchDir, modulePath);
+                        if (relativePath.startsWith("..") || relativePath.length === 0 || !isCompilableDevModule(relativePath)) {
+                            return;
+                        }
+
+                        if (!shouldProcessDevWatchEvent(recentEvents, relativePath)) {
+                            return;
+                        }
+
+                        notify("reload");
+                        void compileChangedDevAsset(watchDir, relativePath);
+                    } catch (error) {
+                        reportDevWatcherIssue(`watch event for ${join(dir, filename)}`, error);
+                    }
+                });
+            attachDevWatcherErrorHandler(watcher, `watch runtime for ${dir}`);
+            watchers.push(watcher);
             readdirSync(dir).forEach((file) => {
                 const fullPath = join(dir, file);
-                if (statSync(fullPath).isDirectory() && !EXCLUDED_DIRS.some((excludedDir) => fullPath.includes(excludedDir)) && !file.startsWith(".")) {
+                if (statSync(fullPath).isDirectory() && !isExcludedWatchDirectory(file) && !file.startsWith(".")) {
                     watchRecursive(fullPath);
                 }
             });
-        } catch {}
+        } catch (error) {
+            watchedDirs.delete(dir);
+            reportDevWatcherIssue(`watch setup for ${dir}`, error);
+        }
     };
 
     watchRecursive(watchDir);
@@ -202,6 +286,89 @@ const createSSEResponse = (hub: DevReloadHub, signal: AbortSignal) => {
             "Content-Type": "text/event-stream",
         },
     });
+};
+
+const getRawRequestPathname = (requestUrl: string): string => {
+    const schemeIndex = requestUrl.indexOf("://");
+    const pathnameStart = schemeIndex === -1 ? requestUrl.indexOf("/") : requestUrl.indexOf("/", schemeIndex + 3);
+    const pathnameWithQuery = pathnameStart === -1 ? "/" : requestUrl.slice(pathnameStart);
+    const queryStart = pathnameWithQuery.search(/[?#]/);
+
+    return queryStart === -1 ? pathnameWithQuery : pathnameWithQuery.slice(0, queryStart);
+};
+
+const isPathInsideRoot = (rootDir: string, targetPath: string): boolean => {
+    const relativePath = relative(rootDir, targetPath);
+
+    return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+};
+
+const resolveDevRequestPath = async (
+    rootDir: string,
+    rawPathname: string,
+    prefix: string,
+): Promise<Result<{ filePath: string; modulePath: string }>> => {
+    const encodedPath = prefix === "/" ? rawPathname.slice(1) : rawPathname.slice(prefix.length);
+    let decodedPath: string;
+
+    try {
+        decodedPath = decodeURIComponent(encodedPath);
+    } catch {
+        return fail("Rejected path");
+    }
+
+    const segments: string[] = [];
+    for (const segment of decodedPath.replaceAll("\\", "/").split("/")) {
+        if (segment.length === 0 || segment === ".") {
+            continue;
+        }
+
+        if (segment === "..") {
+            return fail("Rejected path");
+        }
+
+        segments.push(segment);
+    }
+
+    if (segments.length === 0) {
+        return fail("Rejected path");
+    }
+
+    const modulePath = segments.join("/");
+    const filePath = join(rootDir, modulePath);
+    const pathStatus = (() => {
+        try {
+            return lstatSync(filePath);
+        } catch {
+            return undefined;
+        }
+    })();
+
+    if (pathStatus?.isSymbolicLink()) {
+        try {
+            const realRootDir = realpathSync(rootDir);
+            const realFilePath = realpathSync(filePath);
+            if (!isPathInsideRoot(realRootDir, realFilePath)) {
+                return fail("Rejected path");
+            }
+
+            return ok({ filePath, modulePath });
+        } catch {
+            return fail("Rejected path");
+        }
+    }
+
+    if (!(await Bun.file(filePath).exists())) {
+        return ok({ filePath, modulePath });
+    }
+
+    const realRootDir = realpathSync(rootDir);
+    const realFilePath = realpathSync(filePath);
+    if (!isPathInsideRoot(realRootDir, realFilePath)) {
+        return fail("Rejected path");
+    }
+
+    return ok({ filePath, modulePath });
 };
 
 const findNodeModulesRoot = async (startDir: string): Promise<Result<string>> => {
@@ -397,6 +564,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
         config.value,
         async (req) => {
             const url = new URL(req.url);
+            const rawPathname = getRawRequestPathname(req.url);
 
             if (url.pathname === "/") {
                 const importMapScript = `<script type="importmap">${JSON.stringify(importMap)}</script>`;
@@ -444,16 +612,31 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                 return new Response(assetFile);
             }
 
-            if (url.pathname.startsWith("/_node_modules/")) {
-                const pkgPath = url.pathname.replace("/_node_modules/", "");
-                return new Response(Bun.file(join(nodeModulesRoot.value, pkgPath)));
+            if (rawPathname.startsWith("/_node_modules/")) {
+                const resolvedNodeModulePath = await resolveDevRequestPath(nodeModulesRoot.value, rawPathname, "/_node_modules/");
+                if (!resolvedNodeModulePath.ok) {
+                    return new Response("Not Found", { status: 404 });
+                }
+
+                const nodeModuleFile = Bun.file(resolvedNodeModulePath.value.filePath);
+                if (!(await nodeModuleFile.exists())) {
+                    return new Response("Not Found", { status: 404 });
+                }
+
+                return new Response(nodeModuleFile);
             }
 
-            if (url.pathname.endsWith(".ts")) {
-                const modulePath = url.pathname.slice(1);
-                const transpiled = await transpileTypeScriptForDev(rootDir, modulePath);
+            if (rawPathname.endsWith(".ts")) {
+                const resolvedSourcePath = await resolveDevRequestPath(rootDir, rawPathname, "/");
+                if (!resolvedSourcePath.ok) {
+                    return new Response("Not Found", { status: 404 });
+                }
+
+                const transpiled = await transpileTypeScriptForDev(rootDir, resolvedSourcePath.value.modulePath);
                 if (!transpiled.ok) {
-                    return new Response(transpiled.error, { status: transpiled.error.startsWith("Missing file:") ? 404 : 500 });
+                    return transpiled.error.startsWith("Missing file:")
+                        ? createNotFoundResponse()
+                        : new Response(transpiled.error, { status: 500 });
                 }
 
                 return new Response(transpiled.value, {
@@ -461,11 +644,15 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                 });
             }
 
-            if (url.pathname.endsWith(".js")) {
-                const modulePath = url.pathname.slice(1);
-                const source = await loadRequiredText(join(rootDir, modulePath));
+            if (rawPathname.endsWith(".js")) {
+                const resolvedSourcePath = await resolveDevRequestPath(rootDir, rawPathname, "/");
+                if (!resolvedSourcePath.ok) {
+                    return new Response("Not Found", { status: 404 });
+                }
+
+                const source = await loadRequiredText(resolvedSourcePath.value.filePath);
                 if (!source.ok) {
-                    return new Response(source.error, { status: source.error.startsWith("Missing file:") ? 404 : 500 });
+                    return source.error.startsWith("Missing file:") ? createNotFoundResponse() : new Response(source.error, { status: 500 });
                 }
 
                 return new Response(source.value, {
@@ -473,11 +660,15 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                 });
             }
 
-            if (url.pathname.endsWith(".svelte")) {
-                const modulePath = url.pathname.slice(1);
-                const compiled = await compileSvelteForDev(rootDir, modulePath);
+            if (rawPathname.endsWith(".svelte")) {
+                const resolvedSourcePath = await resolveDevRequestPath(rootDir, rawPathname, "/");
+                if (!resolvedSourcePath.ok) {
+                    return new Response("Not Found", { status: 404 });
+                }
+
+                const compiled = await compileSvelteForDev(rootDir, resolvedSourcePath.value.modulePath);
                 if (!compiled.ok) {
-                    return new Response(compiled.error, { status: 500 });
+                    return compiled.error.startsWith("Missing file:") ? createNotFoundResponse() : new Response(compiled.error, { status: 500 });
                 }
 
                 return new Response(compiled.value, {
