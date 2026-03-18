@@ -42,6 +42,7 @@ export type BuildSvelteOptions = {
     outDir?: string;
     port?: number;
     rootDir?: string;
+    sourcemap?: boolean;
 };
 
 export const DEFAULT_HTML_SHELL: HtmlShell = {
@@ -127,6 +128,18 @@ const readOptionalNumberField = (config: Record<string, unknown>, field: string)
     }
 
     return fail(`Invalid ${field} in ${CONFIG_FILE_NAME}: expected non-negative integer.`);
+};
+
+const readOptionalBooleanField = (config: Record<string, unknown>, field: string): Result<boolean | undefined> => {
+    if (!hasOwnProperty(config, field) || config[field] === undefined) {
+        return ok(undefined);
+    }
+
+    if (typeof config[field] === "boolean") {
+        return ok(config[field]);
+    }
+
+    return fail(`Invalid ${field} in ${CONFIG_FILE_NAME}: expected boolean.`);
 };
 
 const isPlainMountId = (mountId: string): boolean => /^[A-Za-z0-9_-]+$/.test(mountId);
@@ -217,6 +230,11 @@ const parseBuildConfig = (value: unknown): Result<BuildSvelteOptions> => {
         return port;
     }
 
+    const sourcemap = readOptionalBooleanField(value, "sourcemap");
+    if (!sourcemap.ok) {
+        return sourcemap;
+    }
+
     return ok({
         appTitle: appTitle.value,
         appComponent: appComponent.value,
@@ -224,6 +242,7 @@ const parseBuildConfig = (value: unknown): Result<BuildSvelteOptions> => {
         mountId: normalizedMountId.value,
         outDir: outDir.value,
         port: port.value,
+        sourcemap: sourcemap.value,
     });
 };
 
@@ -517,6 +536,8 @@ export const createSveltePlugin = (cssByPath: Map<string, string>): Bun.BunPlugi
 
 export const defineSvelteConfig = (config: BuildSvelteOptions): BuildSvelteOptions => config;
 
+const resolveSourcemapMode = (sourcemap: boolean | undefined): Bun.BuildConfig["sourcemap"] => (sourcemap ? "inline" : "none");
+
 export const loadSvelteConfig = async (cwd = process.cwd()): Promise<Result<BuildSvelteOptions>> => {
     const configRoot = resolve(cwd);
     const configPath = join(configRoot, CONFIG_FILE_NAME);
@@ -731,7 +752,7 @@ export const buildSvelte = async (options: BuildSvelteOptions = {}): Promise<Res
             },
             outdir: stageDir,
             plugins: [createSveltePlugin(cssByPath)],
-            sourcemap: "none",
+            sourcemap: resolveSourcemapMode(options.sourcemap),
             splitting: true,
             target: "browser",
         });

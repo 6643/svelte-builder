@@ -19,7 +19,9 @@
     },
     "scripts": {
         "build": "bun run build.ts",
+        "check": "bun run typecheck && bun test",
         "dev": "bun --hot server.ts",
-        "test": "bun test"
+        "test": "bun test",
+        "typecheck": "tsc -p tsconfig.json --noEmit"
     }
 }

@@ -120,7 +120,7 @@ const formatExpectedBinarySize = (bytes: number): string => {
 
 const writeConfiguredBuildFixture = (
     rootDir: string,
-    options: { assetsDirLine: string; appColor: string; appTitle: string },
+    options: { assetsDirLine: string; appColor: string; appTitle: string; sourcemapLine?: string },
 ): void => {
     mkdirSync(join(rootDir, "src"), { recursive: true });
     mkdirSync(join(rootDir, "assets"), { recursive: true });
@@ -152,6 +152,7 @@ const writeConfiguredBuildFixture = (
             "",
             "export default defineSvelteConfig({",
             `    assetsDir: ${options.assetsDirLine},`,
+            options.sourcemapLine === undefined ? null : `    sourcemap: ${options.sourcemapLine},`,
             "});",
         ]
             .filter((line): line is string => line !== null)
@@ -400,6 +401,18 @@ test("dev compile cache reuses unchanged output and invalidates updated modules"
     expect(cache.read("src/App.svelte", 1000)).toBeUndefined();
 });
 
+test("dev watch roots stay focused on source, assets, and root-level entry files", async () => {
+    const { resolveDevWatchRoots } = await import("../packages/bun-svelte-builder/src/dev.ts");
+
+    const roots = resolveDevWatchRoots("/repo", "/repo/assets", "/repo/src/App.svelte");
+
+    expect(roots).toEqual([
+        { path: "/repo", recursive: false },
+        { path: "/repo/assets", recursive: true },
+        { path: "/repo/src", recursive: true },
+    ]);
+});
+
 test("dev watcher surfaces non-trivial errors and ignores transient missing-file races", async () => {
     const { formatDevWatcherIssue } = await import("../packages/bun-svelte-builder/src/dev.ts");
 
@@ -491,6 +504,103 @@ test("package entry exports buildSvelte for reusable builds", async () => {
     expect(outputFiles.some((file) => /^[a-f0-9]{16}\.js$/.test(file))).toBe(true);
     expect(outputFiles.some((file) => /^[a-f0-9]{16}\.css$/.test(file))).toBe(true);
     expect(outputFiles).toContain("index.html");
+});
+
+test("workspace scripts use the published CLI entry and expose check commands", () => {
+    const rootPackageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
+        scripts?: Record<string, string>;
+    };
+    const examplePackageJson = JSON.parse(readFileSync(join(process.cwd(), "examples", "package.json"), "utf8")) as {
+        scripts?: Record<string, string>;
+    };
+
+    expect(rootPackageJson.scripts?.typecheck).toBeDefined();
+    expect(rootPackageJson.scripts?.check).toContain("bun run typecheck");
+    expect(rootPackageJson.scripts?.check).toContain("bun test");
+    expect(examplePackageJson.scripts?.build).toBe("bun-svelte-builder build");
+    expect(examplePackageJson.scripts?.dev).toBe("bun-svelte-builder dev");
+});
+
+test("buildProduction can emit inline sourcemaps when enabled in code", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsp-inline-sourcemap-code-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(
+        join(rootDir, "main.ts"),
+        [
+            'import { mount } from "svelte";',
+            'import App from "./src/App.svelte";',
+            'mount(App, { target: document.getElementById("app")! });',
+        ].join("\n"),
+    );
+
+    writeFileSync(
+        join(rootDir, "src", "App.svelte"),
+        ["<h1>maps</h1>", "", "<style>", "  h1 { color: rebeccapurple; }", "</style>"].join("\n"),
+    );
+
+    const result = await buildProduction({ rootDir, sourcemap: true });
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    const entryJs = readFileSync(join(result.value.outDir, result.value.jsFile), "utf8");
+
+    expect(entryJs).toContain("sourceMappingURL=data:application/json;base64,");
+});
+
+test("runConfiguredBuild can emit inline sourcemaps when enabled in config", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsp-inline-sourcemap-config-"));
+    createdDirs.push(rootDir);
+
+    writeConfiguredBuildFixture(rootDir, {
+        assetsDirLine: '"assets"',
+        appColor: "seagreen",
+        appTitle: "maps",
+        sourcemapLine: "true",
+    });
+
+    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const result = await runConfiguredBuild(rootDir);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    const entryJs = readFileSync(join(result.value.outDir, result.value.jsFile), "utf8");
+
+    expect(entryJs).toContain("sourceMappingURL=data:application/json;base64,");
+});
+
+test("runConfiguredBuild rejects non-boolean sourcemap config values", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsp-inline-sourcemap-invalid-"));
+    createdDirs.push(rootDir);
+
+    writeConfiguredBuildFixture(rootDir, {
+        assetsDirLine: '"assets"',
+        appColor: "salmon",
+        appTitle: "invalid maps",
+        sourcemapLine: '"yes"',
+    });
+
+    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const result = await runConfiguredBuild(rootDir);
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        throw new Error("Expected build to reject a non-boolean sourcemap value");
+    }
+
+    expect(result.error).toContain("Invalid sourcemap");
 });
 
 test("buildSvelte generates the bootstrap module and respects mountId", async () => {

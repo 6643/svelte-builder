@@ -13,6 +13,11 @@ export type DevServerHandle = {
     stop: () => Promise<void>;
 };
 
+export type DevWatchRoot = {
+    path: string;
+    recursive: boolean;
+};
+
 const EXCLUDED_DIRS = ["node_modules", ".git", "dist"];
 const DEV_WATCH_DEBOUNCE_MS = 100;
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
@@ -175,6 +180,27 @@ const getDevModuleMtime = (rootDir: string, modulePath: string): Result<number> 
     }
 };
 
+export const resolveDevWatchRoots = (rootDir: string, assetsDir: string | undefined, appComponentPath: string): DevWatchRoot[] => {
+    const roots = new Map<string, DevWatchRoot>();
+    const addRoot = (path: string, recursive: boolean) => {
+        const existing = roots.get(path);
+        if (existing !== undefined) {
+            roots.set(path, { path, recursive: existing.recursive || recursive });
+            return;
+        }
+
+        roots.set(path, { path, recursive });
+    };
+
+    addRoot(rootDir, false);
+    addRoot(dirname(appComponentPath), true);
+    if (assetsDir !== undefined) {
+        addRoot(assetsDir, true);
+    }
+
+    return Array.from(roots.values()).sort((left, right) => Number(left.recursive) - Number(right.recursive) || left.path.localeCompare(right.path));
+};
+
 const loadDevModule = async (
     rootDir: string,
     modulePath: string,
@@ -242,11 +268,12 @@ type DevReloadHub = {
     subscribe: (listener: (data: string) => void) => () => void;
 };
 
-const createDevReloadHub = (watchDir: string): DevReloadHub => {
+const createDevReloadHub = (watchDir: string, watchRoots: DevWatchRoot[]): DevReloadHub => {
     const watchers: { close: () => void }[] = [];
     const listeners = new Set<(data: string) => void>();
     const recentEvents = new Map<string, number>();
     const watchedDirs = new Set<string>();
+    const recursiveWatchRoots = new Set(watchRoots.filter((root) => root.recursive).map((root) => root.path));
     const cache = createDevCompileCache();
 
     const stop = (): void => {
@@ -261,7 +288,7 @@ const createDevReloadHub = (watchDir: string): DevReloadHub => {
         }
     };
 
-    const watchRecursive = (dir: string) => {
+    const watchDirectory = (dir: string, recursive: boolean) => {
         if (watchedDirs.has(dir)) {
             return;
         }
@@ -279,7 +306,9 @@ const createDevReloadHub = (watchDir: string): DevReloadHub => {
                         const entry = lstatSync(modulePath);
                         if (entry.isDirectory()) {
                             if (!isExcludedWatchDirectory(filename) && !filename.startsWith(".")) {
-                                watchRecursive(modulePath);
+                                if (recursive || recursiveWatchRoots.has(modulePath)) {
+                                    watchDirectory(modulePath, true);
+                                }
                             }
                             return;
                         }
@@ -305,19 +334,21 @@ const createDevReloadHub = (watchDir: string): DevReloadHub => {
                 });
             attachDevWatcherErrorHandler(watcher, `watch runtime for ${dir}`);
             watchers.push(watcher);
-            readdirSync(dir).forEach((file) => {
-                const fullPath = join(dir, file);
-                if (statSync(fullPath).isDirectory() && !isExcludedWatchDirectory(file) && !file.startsWith(".")) {
-                    watchRecursive(fullPath);
-                }
-            });
+            if (recursive) {
+                readdirSync(dir).forEach((file) => {
+                    const fullPath = join(dir, file);
+                    if (statSync(fullPath).isDirectory() && !isExcludedWatchDirectory(file) && !file.startsWith(".")) {
+                        watchDirectory(fullPath, true);
+                    }
+                });
+            }
         } catch (error) {
             watchedDirs.delete(dir);
             reportDevWatcherIssue(`watch setup for ${dir}`, error);
         }
     };
 
-    watchRecursive(watchDir);
+    watchRoots.forEach((root) => watchDirectory(root.path, root.recursive));
 
     return {
         cache,
@@ -540,19 +571,19 @@ const transpileTypeScriptForDev = async (rootDir: string, modulePath: string, sh
     }
 
     return Promise.resolve()
-        .then(() => ok(tsTranspiler.transformSync(source.value)))
-        .then((result) => {
+        .then(() => {
+            const transformed = tsTranspiler.transformSync(source.value);
             if (shouldLog) {
-                logRecompiledAsset(modulePath, result.value);
+                logRecompiledAsset(modulePath, transformed);
             }
 
-            return result;
+            return ok(transformed);
         })
         .catch((error) => fail(`Failed to transpile ${modulePath}: ${getErrorMessage(error)}`));
 };
 
-const createServerHandle = (server: Bun.Server): DevServerHandle => ({
-    port: server.port,
+const createServerHandle = (server: Bun.Server<undefined>): DevServerHandle => ({
+    port: server.port ?? 0,
     stop: async () => {
         server.stop(true);
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -563,10 +594,14 @@ const resolveDevPort = (config: BuildSvelteOptions): number => config.port ?? 30
 
 const createEphemeralPortCandidate = (): number => randomInt(DEV_PORT_RANGE_MIN, DEV_PORT_RANGE_MAX + 1);
 
+type BunServeOptions = Bun.Serve.Options<undefined>;
+type DevFetchHandler = (req: Request) => Response | Promise<Response>;
+type DevErrorHandler = (error: Bun.ErrorLike) => Response | Promise<Response> | void | Promise<void>;
+
 const startServer = async (
     config: BuildSvelteOptions,
-    fetch: Bun.Serve.Options["fetch"],
-    error: Bun.Serve.Options["error"],
+    fetch: DevFetchHandler,
+    error: DevErrorHandler,
 ): Promise<Result<DevServerHandle>> => {
     const requestedPort = resolveDevPort(config);
     let attemptsRemaining = requestedPort === 0 ? DEV_PORT_RETRY_LIMIT : 1;
@@ -579,10 +614,10 @@ const startServer = async (
                 ok(
                     createServerHandle(
                         Bun.serve({
-                            error,
-                            fetch,
+                            error: ((serverError) => error(serverError)) as BunServeOptions["error"],
+                            fetch: ((req) => fetch(req)) as BunServeOptions["fetch"],
                             port: nextPort,
-                        }),
+                        } as BunServeOptions),
                     ),
                 ),
             )
@@ -633,11 +668,11 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
     }
 
     const importMap = createImportMap();
-    const reloadHub = createDevReloadHub(rootDir);
+    const reloadHub = createDevReloadHub(rootDir, resolveDevWatchRoots(rootDir, assetsDir.value, appComponentPath));
 
     const started = await startServer(
         config.value,
-        async (req) => {
+        async (req: Request) => {
             const url = new URL(req.url);
             const rawPathname = getRawRequestPathname(req.url);
 
@@ -753,7 +788,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
 
             return new Response("Not Found", { status: 404 });
         },
-        (error) => {
+        (error: Bun.ErrorLike) => {
             console.error(error);
             return new Response(`Internal Server Error: ${error.message}`, { status: 500 });
         },
