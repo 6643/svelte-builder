@@ -4,6 +4,7 @@ node_modules
 # output
 out
 dist
+examples/dist/
 *.tgz
 
 # code coverage
@@ -27,6 +28,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cache
 .tmp-*
 .worktrees
+docs/superpowers/
+examples/node_modules/
 *.tsbuildinfo
 
 # IntelliJ based IDEs
