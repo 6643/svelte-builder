@@ -507,7 +507,7 @@ test("package entry exports buildSvelte for reusable builds", async () => {
     expect(outputFiles).toContain("index.html");
 });
 
-test("root scripts expose check commands and examples consume the installed root package", () => {
+test("root scripts expose check commands and examples are documented as repo-local dogfood", () => {
     const rootPackageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
         scripts?: Record<string, string>;
     };
@@ -515,6 +515,7 @@ test("root scripts expose check commands and examples consume the installed root
         dependencies?: Record<string, string>;
         scripts?: Record<string, string>;
     };
+    const rootReadme = readFileSync(join(process.cwd(), "README.md"), "utf8");
 
     expect(rootPackageJson.scripts?.typecheck).toBeDefined();
     expect(rootPackageJson.scripts?.check).toContain("bun run typecheck");
@@ -522,6 +523,8 @@ test("root scripts expose check commands and examples consume the installed root
     expect(examplePackageJson.dependencies?.["bun-svelte-builder"]).toBe("..");
     expect(examplePackageJson.scripts?.build).toBe("bun ./node_modules/bun-svelte-builder/src/cli.ts build");
     expect(examplePackageJson.scripts?.dev).toBe("bun ./node_modules/bun-svelte-builder/src/cli.ts dev");
+    expect(rootReadme).toContain("`examples` 是仓库内 dogfood 示例");
+    expect(rootReadme).toContain("不作为发布包消费者模板");
 });
 
 test("repository root package exposes publish metadata and README positions it as the primary entry", () => {
@@ -551,6 +554,35 @@ test("repository root package exposes publish metadata and README positions it a
     expect(rootReadme).toContain("# bun-svelte-builder");
     expect(rootReadme).not.toContain("packages/bun-svelte-builder/src");
     expect(rootReadme).not.toContain("仍暂时保留");
+});
+
+test("repository root package includes release metadata, license, and package-focused README guidance", () => {
+    const rootPackageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
+        description?: string;
+        license?: string;
+        repository?: string | { type?: string; url?: string };
+    };
+    const rootReadme = readFileSync(join(process.cwd(), "README.md"), "utf8");
+
+    expect(rootPackageJson.description).toBeDefined();
+    expect(rootPackageJson.license).toBe("MIT");
+    expect(rootPackageJson.repository).toEqual({
+        type: "git",
+        url: "git+https://github.com/6643/bun-svelte-builder.git",
+    });
+    expect(existsSync(join(process.cwd(), "LICENSE"))).toBe(true);
+    expect(rootReadme).not.toContain("这个仓库当前的主包入口");
+    expect(rootReadme).not.toContain("bun ./node_modules/bun-svelte-builder/src/cli.ts");
+    expect(rootReadme).toContain("bun-svelte-builder dev");
+    expect(rootReadme).toContain("bun-svelte-builder build");
+});
+
+test("tsconfig excludes generated dist directories from typechecking", () => {
+    const tsconfigSource = readFileSync(join(process.cwd(), "tsconfig.json"), "utf8");
+
+    expect(tsconfigSource).toContain('"exclude"');
+    expect(tsconfigSource).toContain('"dist"');
+    expect(tsconfigSource).toContain('"examples/dist"');
 });
 
 test("buildProduction can emit inline sourcemaps when enabled in code", async () => {

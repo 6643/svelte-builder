@@ -1,11 +1,17 @@
 {
     "name": "bun-svelte-builder",
     "version": "0.0.0",
+    "description": "Minimal Bun + Svelte 5 production build preset.",
     "bin": {
         "bun-svelte-builder": "./src/cli.ts"
     },
     "module": "./src/index.ts",
     "type": "module",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/6643/bun-svelte-builder.git"
+    },
     "exports": {
         ".": "./src/index.ts",
         "./runtime": "./src/runtime.ts",

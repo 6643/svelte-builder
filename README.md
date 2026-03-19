@@ -1,10 +1,10 @@
 # bun-svelte-builder
 
-`bun-svelte-builder` 是这个仓库当前的主包入口。
+Minimal Bun + Svelte 5 production build preset.
 
-当前生效的源码与包入口都在仓库根目录: `src/`、`package.json`、`README.md`。
+`examples` 是仓库内 dogfood 示例, 用来验证当前仓库里的构建器行为和回归场景, 不作为发布包消费者模板。
 
-`examples` 是演示如何消费该预设的独立 workspace 示例包, 目录内保留业务源码与配置, 当前包含 `src/`、`assets/`、`bun-svelte-builder.config.ts` 和 `package.json`。入口由构建器根据 `appComponent` 自动生成, 不再需要手写 `main.ts`。
+它保留独立项目形态, 包含 `src/`、`assets/`、`bun-svelte-builder.config.ts` 和 `package.json`。入口由构建器根据 `appComponent` 自动生成, 不再需要手写 `main.ts`。
 
 统一配置文件名是 `bun-svelte-builder.config.ts`。
 
@@ -114,8 +114,8 @@ bun install
 作为项目依赖使用:
 
 ```bash
-bun ./node_modules/bun-svelte-builder/src/cli.ts dev
-bun ./node_modules/bun-svelte-builder/src/cli.ts build
+bun-svelte-builder dev
+bun-svelte-builder build
 ```
 
 在这个仓库里运行示例:
@@ -125,5 +125,7 @@ cd examples
 bun run dev
 bun run build
 ```
+
+这组命令是仓库内 dogfood 工作流, 用于验证当前仓库源码与安装拓扑; 如果你是在自己的项目里使用本包, 应按上面的包依赖方式集成, 而不是复制 `examples` 的仓库内脚本。
 
 示例配置文件见 `examples/bun-svelte-builder.config.ts`。
