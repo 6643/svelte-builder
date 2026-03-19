@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { runConfiguredDevServer } from "./src/index";
 
-const DEFAULT_EXAMPLE_ROOT = join(import.meta.dir, "examples");
+const DEFAULT_EXAMPLE_ROOT = join(import.meta.dir, "demo");
 
 export const serveDevelopment = () => runConfiguredDevServer(DEFAULT_EXAMPLE_ROOT);
 

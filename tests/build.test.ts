@@ -523,8 +523,8 @@ test("root scripts expose check commands and demo is documented as repo-local do
     expect(rootPackageJson.scripts?.check).toContain("bun run typecheck");
     expect(rootPackageJson.scripts?.check).toContain("bun test");
     expect(examplePackageJson.dependencies?.["bun-svelte-builder"]).toBe("github:6643/bun-svelte-builder");
-    expect(examplePackageJson.scripts?.build).toBe("bun ./node_modules/bun-svelte-builder/src/cli.ts build");
-    expect(examplePackageJson.scripts?.dev).toBe("bun ./node_modules/bun-svelte-builder/src/cli.ts dev");
+    expect(examplePackageJson.scripts?.build).toBe("bun ./node_modules/.bin/bun-svelte-builder build");
+    expect(examplePackageJson.scripts?.dev).toBe("bun ./node_modules/.bin/bun-svelte-builder dev");
     expect(rootReadme).toContain("`demo` 是仓库内 dogfood 示例");
     expect(rootReadme).toContain("不作为发布包消费者模板");
 });

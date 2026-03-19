@@ -1,10 +1,10 @@
 # dependencies
 node_modules/
-examples/node_modules/
+demo/node_modules/
 
 # build output
 dist/
-examples/dist/
+demo/dist/
 *.tgz
 
 # local work and caches

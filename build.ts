@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { type BuildSvelteOptions, buildSvelte, formatBuildReport, runConfiguredBuild } from "./src/index";
 
-const DEFAULT_EXAMPLE_ROOT = join(import.meta.dir, "examples");
+const DEFAULT_EXAMPLE_ROOT = join(import.meta.dir, "demo");
 const hasBuildOverrides = (options?: BuildSvelteOptions): options is BuildSvelteOptions =>
     Object.values(options ?? {}).some((value) => value !== undefined);
 

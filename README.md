@@ -2,7 +2,7 @@
 
 Minimal Bun + Svelte 5 production build preset.
 
-`examples` 是仓库内 dogfood 示例, 用来验证当前仓库里的构建器行为和回归场景, 不作为发布包消费者模板。
+`demo` 是仓库内 dogfood 示例, 用来验证当前仓库里的构建器行为和回归场景, 不作为发布包消费者模板。
 
 它保留独立项目形态, 包含 `src/`、`assets/`、`bun-svelte-builder.config.ts` 和 `package.json`。入口由构建器根据 `appComponent` 自动生成, 不再需要手写 `main.ts`。
 
@@ -63,7 +63,7 @@ export default defineSvelteConfig({
 最小目录形态:
 
 ```text
-examples/
+demo/
   src/
     App.svelte
   assets/
@@ -118,14 +118,14 @@ bun-svelte-builder dev
 bun-svelte-builder build
 ```
 
-在这个仓库里运行示例:
+在这个仓库里运行 demo:
 
 ```bash
-cd examples
+cd demo
 bun run dev
 bun run build
 ```
 
-这组命令是仓库内 dogfood 工作流, 用于验证当前仓库源码与安装拓扑; 如果你是在自己的项目里使用本包, 应按上面的包依赖方式集成, 而不是复制 `examples` 的仓库内脚本。
+这组命令是仓库内 dogfood 工作流, 用于验证当前仓库源码与安装拓扑; 如果你是在自己的项目里使用本包, 应按上面的包依赖方式集成, 而不是复制 `demo` 的仓库内脚本。
 
-示例配置文件见 `examples/bun-svelte-builder.config.ts`。
+示例配置文件见 `demo/bun-svelte-builder.config.ts`。

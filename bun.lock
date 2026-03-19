@@ -13,7 +13,7 @@
         "typescript": "^5.9.3",
       },
     },
-    "examples": {
+    "demo": {
       "name": "bun-svelte-builder-example",
       "dependencies": {
         "bun-svelte-builder": "github:6643/bun-svelte-builder",
@@ -46,9 +46,9 @@
 
     "axobject-query": ["axobject-query@4.1.0", "", {}, "sha512-qIj0G9wZbMGNLjLmg1PT6v2mE9AH2zlnADJD/2tC6E00hgmhUOfEB6greHPAfLRSufHqROIUTkw6E+M3lH0PTQ=="],
 
-    "bun-svelte-builder": ["bun-svelte-builder@github:6643/bun-svelte-builder#6118961", { "peerDependencies": { "svelte": "next", "typescript": "^5.9.3" }, "bin": { "bun-svelte-builder": "./src/cli.ts" } }, "6643-bun-svelte-builder-6118961", "sha512-/a9mB3Rsm4klXMFVdv3ipCXiUsQnvIT6LT/Ef6vh6J4dkr7A4MIp7Z8MNeWAksAHwhtYgNulVJE3eUid/vDuvg=="],
+    "bun-svelte-builder": ["bun-svelte-builder@github:6643/bun-svelte-builder#2101f28", { "peerDependencies": { "svelte": "next", "typescript": "^5.9.3" }, "bin": { "bun-svelte-builder": "./src/cli.ts" } }, "6643-bun-svelte-builder-2101f28", "sha512-D6ntm6ENWAxRbM3W02Q681MTuJHAwp8dZ/mCQT389H9jtpjhu9e9/ldWWuknJSUtPfzoltU5ajnHa0uZoSbvTg=="],
 
-    "bun-svelte-builder-example": ["bun-svelte-builder-example@workspace:examples"],
+    "bun-svelte-builder-example": ["bun-svelte-builder-example@workspace:demo"],
 
     "bun-types": ["bun-types@1.3.11", "", { "dependencies": { "@types/node": "*" } }, "sha512-1KGPpoxQWl9f6wcZh57LvrPIInQMn2TQ7jsgxqpRzg+l0QPOFvJVH7HmvHo/AiPgwXy+/Thf6Ov3EdVn1vOabg=="],
 

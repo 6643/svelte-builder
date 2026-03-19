@@ -24,7 +24,7 @@
         "package.json"
     ],
     "workspaces": [
-        "examples"
+        "demo"
     ],
     "devDependencies": {
         "@types/bun": "latest",
