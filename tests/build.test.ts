@@ -388,6 +388,31 @@ test("dev watcher dedupes repeated events for the same file within the debounce 
     expect(shouldProcessDevWatchEvent(recentEvents, "src/App.svelte", 1200)).toBe(true);
 });
 
+test("findNodeModulesRoot prefers the closest install that owns the .bun store", async () => {
+    const { findNodeModulesRoot } = await import("../src/dev.ts");
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-node-modules-root-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "node_modules", ".bun"), { recursive: true });
+    mkdirSync(join(rootDir, "node_modules", "svelte"), { recursive: true });
+    writeFileSync(join(rootDir, "node_modules", "svelte", "package.json"), '{"name":"svelte"}');
+
+    const demoDir = join(rootDir, "demo");
+    mkdirSync(join(demoDir, "node_modules"), { recursive: true });
+    writeFileSync(join(demoDir, "node_modules", "svelte"), "", { flag: "a" });
+    rmSync(join(demoDir, "node_modules", "svelte"));
+    symlinkSync(join(rootDir, "node_modules", "svelte"), join(demoDir, "node_modules", "svelte"), "dir");
+
+    const result = await findNodeModulesRoot(demoDir);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    expect(result.value).toBe(join(rootDir, "node_modules"));
+});
+
 test("dev compile cache reuses unchanged output and invalidates updated modules", async () => {
     const { createDevCompileCache } = await import("../src/dev.ts");
 
@@ -2332,9 +2357,10 @@ test("runConfiguredDevServer rejects escaped node_modules paths and still serves
 
         const validResponse = await fetch(`http://127.0.0.1:${result.value.port}/_node_modules/svelte/package.json`);
         const validBody = await validResponse.text();
+        const validPackageJson = JSON.parse(validBody) as { name?: string };
 
         expect(validResponse.status).toBe(200);
-        expect(validBody).toContain('"name":"svelte"');
+        expect(validPackageJson.name).toBe("svelte");
     } finally {
         await result.value.stop();
     }

@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { lstatSync, readdirSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, lstatSync, readdirSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { gzipSync } from "node:zlib";
 import { compile } from "svelte/compiler";
@@ -477,18 +477,24 @@ const resolveDevRequestPath = async (
     return ok({ filePath, modulePath });
 };
 
-const findNodeModulesRoot = async (startDir: string): Promise<Result<string>> => {
+export const findNodeModulesRoot = async (startDir: string): Promise<Result<string>> => {
     let current = startDir;
+    let fallback: string | undefined;
 
     while (true) {
         const candidate = join(current, "node_modules", "svelte", "package.json");
         if (await Bun.file(candidate).exists()) {
-            return ok(join(current, "node_modules"));
+            const nodeModulesDir = join(current, "node_modules");
+            if (existsSync(join(nodeModulesDir, ".bun"))) {
+                return ok(nodeModulesDir);
+            }
+
+            fallback ??= nodeModulesDir;
         }
 
         const parent = dirname(current);
         if (parent === current) {
-            return fail(`Unable to locate node_modules from ${startDir}`);
+            return fallback === undefined ? fail(`Unable to locate node_modules from ${startDir}`) : ok(fallback);
         }
 
         current = parent;
