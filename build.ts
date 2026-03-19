@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { type BuildSvelteOptions, buildSvelte, formatBuildReport, runConfiguredBuild } from "./packages/bun-svelte-builder/src/index";
+import { type BuildSvelteOptions, buildSvelte, formatBuildReport, runConfiguredBuild } from "./src/index";
 
 const DEFAULT_EXAMPLE_ROOT = join(import.meta.dir, "examples");
 const hasBuildOverrides = (options?: BuildSvelteOptions): options is BuildSvelteOptions =>

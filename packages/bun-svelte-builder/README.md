@@ -1,6 +1,10 @@
-# bun-svelte-builder
+# bun-svelte-builder compatibility layer
 
-Minimal Bun + Svelte 5 production build preset.
+This directory is kept temporarily during the root source migration.
+
+The active package entry now lives at the repository root.
+
+Do not publish or consume this directory directly.
 
 SPA only.
 

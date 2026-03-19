@@ -1,19 +1,19 @@
 {
     "name": "bun-svelte-builder",
-    "bin": {
-        "bun-svelte-builder": "./packages/bun-svelte-builder/src/cli.ts"
-    },
     "version": "0.0.0",
-    "module": "./packages/bun-svelte-builder/src/index.ts",
+    "bin": {
+        "bun-svelte-builder": "./src/cli.ts"
+    },
+    "module": "./src/index.ts",
     "type": "module",
     "exports": {
-        ".": "./packages/bun-svelte-builder/src/index.ts",
-        "./runtime": "./packages/bun-svelte-builder/src/runtime.ts",
-        "./build": "./packages/bun-svelte-builder/src/build.ts",
+        ".": "./src/index.ts",
+        "./runtime": "./src/runtime.ts",
+        "./build": "./src/build.ts",
         "./package.json": "./package.json"
     },
     "files": [
-        "packages/bun-svelte-builder/src",
+        "src",
         "README.md",
         "package.json"
     ],

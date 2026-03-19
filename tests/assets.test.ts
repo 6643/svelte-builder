@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { resolveAssetPath } from "../packages/bun-svelte-builder/src/assets";
+import { resolveAssetPath } from "../src/assets";
 
 test("resolveAssetPath dev assets keeps asset subpaths inside the configured assets root", () => {
     const assetsRoot = join(process.cwd(), "tmp-assets-root");

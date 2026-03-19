@@ -2,7 +2,7 @@
 
 `bun-svelte-builder` 是这个仓库当前的主包入口。
 
-当前迁移阶段仍然保留 `packages/bun-svelte-builder/src` 作为源码位置, 但安装、导入和发布都以仓库根目录为准。
+当前生效的源码与包入口都在仓库根目录: `src/`、`package.json`、`README.md`。
 
 `examples` 是演示如何消费该预设的独立 workspace 示例包, 目录内保留业务源码与配置, 当前包含 `src/`、`assets/`、`bun-svelte-builder.config.ts` 和 `package.json`。入口由构建器根据 `appComponent` 自动生成, 不再需要手写 `main.ts`。
 
@@ -101,7 +101,7 @@ src/lazy/ButtonDemo.svelte   2026-03-18 11:11:11  4.1 KiB  1.9 KiB
 
 生产构建采用单写者 `dist` 发布:
 
-- 最终产物直接写入 `examples/dist/`
+- 最终产物直接写入当前项目的 `<outDir>/`
 - 同一输出目录只允许一个构建进程写入
 - 若检测到失效的 `dist.lock`, 构建会自动回收后继续
 
@@ -111,14 +111,14 @@ src/lazy/ButtonDemo.svelte   2026-03-18 11:11:11  4.1 KiB  1.9 KiB
 bun install
 ```
 
-从仓库根目录运行示例:
+作为项目依赖使用:
 
 ```bash
-bun run dev
-bun run build
+bun ./node_modules/bun-svelte-builder/src/cli.ts dev
+bun ./node_modules/bun-svelte-builder/src/cli.ts build
 ```
 
-直接运行示例包:
+在这个仓库里运行示例:
 
 ```bash
 cd examples
@@ -126,4 +126,4 @@ bun run dev
 bun run build
 ```
 
-示例配置文件见 [examples/bun-svelte-builder.config.ts](/home/_/files/11/svelte5-bun-demo/examples/bun-svelte-builder.config.ts)。
+示例配置文件见 `examples/bun-svelte-builder.config.ts`。

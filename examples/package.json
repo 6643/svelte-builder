@@ -6,7 +6,7 @@
         "svelte": "next"
     },
     "scripts": {
-        "build": "bun ../packages/bun-svelte-builder/src/cli.ts build",
-        "dev": "bun ../packages/bun-svelte-builder/src/cli.ts dev"
+        "build": "bun ../src/cli.ts build",
+        "dev": "bun ../src/cli.ts dev"
     }
 }

@@ -18,7 +18,7 @@ import { pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
 import { createServer } from "node:net";
 import { request } from "node:http";
-import type { BuildSvelteOptions } from "../packages/bun-svelte-builder/src/build";
+import type { BuildSvelteOptions } from "../src/build";
 
 const createdDirs: string[] = [];
 const EXAMPLE_ROOT = join(process.cwd(), "examples");
@@ -359,11 +359,12 @@ test("example workspace package contains the canonical demo source tree", async 
     expect(configSource).toContain('appComponent: "src/App.svelte"');
     expect(configSource).toContain('appTitle: "Bun Svelte Builder"');
     expect(configSource).toContain('mountId: "app"');
+    expect(configSource).toContain('import { defineSvelteConfig } from "../src/index.ts"');
     expect(appSource).toContain('src="/assets/panel-mark.svg"');
 });
 
 test("bootstrap module source defaults appComponent and mounts to the configured id", async () => {
-    const { createBootstrapModuleSource } = await import("../packages/bun-svelte-builder/src/bootstrap.ts");
+    const { createBootstrapModuleSource } = await import("../src/bootstrap.ts");
     const defaultSource = createBootstrapModuleSource();
     const customSource = createBootstrapModuleSource("src/Custom.svelte", "root");
 
@@ -374,7 +375,7 @@ test("bootstrap module source defaults appComponent and mounts to the configured
 });
 
 test("dev watcher dedupes repeated events for the same file within the debounce window", async () => {
-    const { shouldProcessDevWatchEvent } = await import("../packages/bun-svelte-builder/src/dev.ts");
+    const { shouldProcessDevWatchEvent } = await import("../src/dev.ts");
 
     expect(shouldProcessDevWatchEvent(new Map(), "src/App.svelte", 1000)).toBe(true);
 
@@ -386,7 +387,7 @@ test("dev watcher dedupes repeated events for the same file within the debounce 
 });
 
 test("dev compile cache reuses unchanged output and invalidates updated modules", async () => {
-    const { createDevCompileCache } = await import("../packages/bun-svelte-builder/src/dev.ts");
+    const { createDevCompileCache } = await import("../src/dev.ts");
 
     const cache = createDevCompileCache();
 
@@ -402,7 +403,7 @@ test("dev compile cache reuses unchanged output and invalidates updated modules"
 });
 
 test("dev watch roots stay focused on source, assets, and root-level entry files", async () => {
-    const { resolveDevWatchRoots } = await import("../packages/bun-svelte-builder/src/dev.ts");
+    const { resolveDevWatchRoots } = await import("../src/dev.ts");
 
     const roots = resolveDevWatchRoots("/repo", "/repo/assets", "/repo/src/App.svelte");
 
@@ -414,7 +415,7 @@ test("dev watch roots stay focused on source, assets, and root-level entry files
 });
 
 test("dev watcher surfaces non-trivial errors and ignores transient missing-file races", async () => {
-    const { formatDevWatcherIssue } = await import("../packages/bun-svelte-builder/src/dev.ts");
+    const { formatDevWatcherIssue } = await import("../src/dev.ts");
 
     expect(formatDevWatcherIssue("compile", Object.assign(new Error("gone"), { code: "ENOENT" }))).toBeUndefined();
     expect(formatDevWatcherIssue("watch setup", new Error("permission denied"))).toContain("watch setup");
@@ -422,7 +423,7 @@ test("dev watcher surfaces non-trivial errors and ignores transient missing-file
 });
 
 test("dev watcher runtime error handler reports non-trivial watcher failures", async () => {
-    const { attachDevWatcherErrorHandler } = await import("../packages/bun-svelte-builder/src/dev.ts");
+    const { attachDevWatcherErrorHandler } = await import("../src/dev.ts");
     const warnings: string[] = [];
     const handlers = new Map<string, (error: unknown) => void>();
     const watcher = {
@@ -449,7 +450,7 @@ test("dev watcher runtime error handler reports non-trivial watcher failures", a
 });
 
 test("runtime module source embeds the configured mount id and helper behavior", async () => {
-    const { createRuntimeModuleSource, getMountTarget } = await import("../packages/bun-svelte-builder/src/runtime.ts");
+    const { createRuntimeModuleSource, getMountTarget } = await import("../src/runtime.ts");
     const runtimeTarget = { id: "app" };
     const scope = {
         getElementById: (id: string) => (id === "app" ? runtimeTarget : null),
@@ -486,7 +487,7 @@ test("package entry exports buildSvelte for reusable builds", async () => {
     );
 
     const { buildSvelte, defineSvelteConfig, formatBuildReport, runConfiguredBuild, runConfiguredDevServer } =
-        await import("../packages/bun-svelte-builder/src/index.ts");
+        await import("../src/index.ts");
     const result = await buildSvelte({ rootDir });
 
     expect(result.ok).toBe(true);
@@ -506,7 +507,7 @@ test("package entry exports buildSvelte for reusable builds", async () => {
     expect(outputFiles).toContain("index.html");
 });
 
-test("workspace scripts use the published CLI entry and expose check commands", () => {
+test("root scripts expose check commands and examples stay runnable during source migration", () => {
     const rootPackageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
         scripts?: Record<string, string>;
     };
@@ -519,8 +520,8 @@ test("workspace scripts use the published CLI entry and expose check commands", 
     expect(rootPackageJson.scripts?.check).toContain("bun run typecheck");
     expect(rootPackageJson.scripts?.check).toContain("bun test");
     expect(examplePackageJson.dependencies?.["bun-svelte-builder"]).toBeUndefined();
-    expect(examplePackageJson.scripts?.build).toBe("bun ../packages/bun-svelte-builder/src/cli.ts build");
-    expect(examplePackageJson.scripts?.dev).toBe("bun ../packages/bun-svelte-builder/src/cli.ts dev");
+    expect(examplePackageJson.scripts?.build).toBe("bun ../src/cli.ts build");
+    expect(examplePackageJson.scripts?.dev).toBe("bun ../src/cli.ts dev");
 });
 
 test("repository root package exposes publish metadata and README positions it as the primary entry", () => {
@@ -535,10 +536,10 @@ test("repository root package exposes publish metadata and README positions it a
 
     expect(rootPackageJson.name).toBe("bun-svelte-builder");
     expect(rootPackageJson.bin).toEqual({
-        "bun-svelte-builder": "./packages/bun-svelte-builder/src/cli.ts",
+        "bun-svelte-builder": "./src/cli.ts",
     });
-    expect(rootPackageJson.exports?.["."]).toBe("./packages/bun-svelte-builder/src/index.ts");
-    expect(rootPackageJson.files).toEqual(["packages/bun-svelte-builder/src", "README.md", "package.json"]);
+    expect(rootPackageJson.exports?.["."]).toBe("./src/index.ts");
+    expect(rootPackageJson.files).toEqual(["src", "README.md", "package.json"]);
     expect(rootPackageJson.scripts).toEqual({
         build: "bun run build.ts",
         check: "bun run typecheck && bun test",
@@ -547,7 +548,7 @@ test("repository root package exposes publish metadata and README positions it a
         typecheck: "tsc -p tsconfig.json --noEmit",
     });
     expect(rootReadme).toContain("# bun-svelte-builder");
-    expect(rootReadme).not.toContain("`packages/bun-svelte-builder` 是可复用的 Bun + Svelte 5 生产构建预设。");
+    expect(rootReadme).toContain("当前生效的源码与包入口都在仓库根目录");
 });
 
 test("buildProduction can emit inline sourcemaps when enabled in code", async () => {
@@ -595,7 +596,7 @@ test("runConfiguredBuild can emit inline sourcemaps when enabled in config", asy
         sourcemapLine: "true",
     });
 
-    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredBuild } = await import("../src/index.ts");
     const result = await runConfiguredBuild(rootDir);
 
     expect(result.ok).toBe(true);
@@ -620,7 +621,7 @@ test("runConfiguredBuild rejects non-boolean sourcemap config values", async () 
         sourcemapLine: '"yes"',
     });
 
-    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredBuild } = await import("../src/index.ts");
     const result = await runConfiguredBuild(rootDir);
 
     expect(result.ok).toBe(false);
@@ -639,7 +640,7 @@ test("buildSvelte generates the bootstrap module and respects mountId", async ()
     writeRuntimeAwareFixture(rootDir);
     expect(existsSync(join(rootDir, "main.ts"))).toBe(false);
 
-    const { buildSvelte } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { buildSvelte } = await import("../src/index.ts");
     const result = await buildSvelte({ mountId: "app", rootDir });
 
     expect(result.ok).toBe(true);
@@ -663,7 +664,7 @@ test("buildSvelte rejects invalid mountId values", async () => {
 
     writeRuntimeAwareFixture(rootDir);
 
-    const { buildSvelte } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { buildSvelte } = await import("../src/index.ts");
 
     for (const mountId of ["", "   ", "#app", ".root"]) {
         const result = await buildSvelte({ mountId, rootDir });
@@ -685,7 +686,7 @@ test("buildSvelte rejects invalid appComponent values", async () => {
     mkdirSync(join(rootDir, "src"), { recursive: true });
     writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>app component</h1>");
 
-    const { buildSvelte } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { buildSvelte } = await import("../src/index.ts");
 
     for (const appComponent of ["", "   ", 42] as const) {
         const result = await buildSvelte({ appComponent: appComponent as string, rootDir });
@@ -728,7 +729,7 @@ test("formatBuildReport lists entry asset sizes and gzip sizes", async () => {
         throw new Error(result.error);
     }
 
-    const { formatBuildReport } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { formatBuildReport } = await import("../src/index.ts");
     const assets = [result.value.jsFile, result.value.cssFile, result.value.htmlFile].map((file) => {
         const buffer = readFileSync(join(result.value.outDir, file));
 
@@ -815,7 +816,7 @@ test("runConfiguredBuild produces the same entry assets across invocation cwd", 
         ].join("\n"),
     );
 
-    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredBuild } = await import("../src/index.ts");
     const first = await runConfiguredBuild(rootDir);
     expect(first.ok).toBe(true);
 
@@ -824,7 +825,7 @@ test("runConfiguredBuild produces the same entry assets across invocation cwd", 
     }
 
     const firstHtml = readFileSync(join(first.value.outDir, first.value.htmlFile), "utf8");
-    const packageEntryUrl = pathToFileURL(join(process.cwd(), "packages", "bun-svelte-builder", "src", "index.ts")).href;
+    const packageEntryUrl = pathToFileURL(join(process.cwd(), "src", "index.ts")).href;
     const script = [
         `const mod = await import(${JSON.stringify(packageEntryUrl)});`,
         "const result = await mod.runConfiguredBuild(process.cwd());",
@@ -863,7 +864,7 @@ test("runConfiguredBuild loads bun-svelte-builder.config.ts and custom outDir", 
         outDirLine: '"public"',
     });
 
-    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredBuild } = await import("../src/index.ts");
     const result = await runConfiguredBuild(rootDir);
 
     expect(result.ok).toBe(true);
@@ -917,7 +918,7 @@ test("runConfiguredBuild ignores rootDir in bun-svelte-builder.config.ts", async
         ].join("\n"),
     );
 
-    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredBuild } = await import("../src/index.ts");
     const result = await runConfiguredBuild(rootDir);
 
     expect(result.ok).toBe(true);
@@ -938,7 +939,7 @@ test("runConfiguredBuild rejects selector-shaped mountId in config", async () =>
         outDirLine: '"public"',
     });
 
-    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredBuild } = await import("../src/index.ts");
     const result = await runConfiguredBuild(rootDir);
 
     expect(result.ok).toBe(false);
@@ -984,7 +985,7 @@ test("runConfiguredBuild rejects htmlTemplate in config", async () => {
         ].join("\n"),
     );
 
-    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredBuild } = await import("../src/index.ts");
     const result = await runConfiguredBuild(rootDir);
 
     expect(result.ok).toBe(false);
@@ -1103,7 +1104,7 @@ test("runConfiguredBuild copies configured assets into dist/assets and keeps the
     writeFileSync(join(rootDir, "assets", "logo.svg"), logoBytes);
     writeFileSync(join(rootDir, "assets", "icons", "check.txt"), "checked");
 
-    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredBuild } = await import("../src/index.ts");
     const result = await runConfiguredBuild(rootDir);
 
     expect(result.ok).toBe(true);
@@ -1149,7 +1150,7 @@ test("buildSvelte copies assets from the default assets directory when assetsDir
     writeFileSync(join(rootDir, "assets", "logo.svg"), "logo-default");
     writeFileSync(join(rootDir, "assets", "icons", "check.txt"), "default-check");
 
-    const { buildSvelte } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { buildSvelte } = await import("../src/index.ts");
     const result = await buildSvelte({ rootDir });
 
     expect(result.ok).toBe(true);
@@ -1183,7 +1184,7 @@ test("runConfiguredBuild copies assets from an absolute assetsDir path", async (
     writeFileSync(join(assetsRoot, "logo.svg"), logoBytes);
     writeFileSync(join(assetsRoot, "nested", "check.txt"), "absolute-check");
 
-    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredBuild } = await import("../src/index.ts");
     const result = await runConfiguredBuild(rootDir);
 
     expect(result.ok).toBe(true);
@@ -1211,7 +1212,7 @@ test("runConfiguredBuild fails when the configured assetsDir is missing", async 
         appTitle: "missing assets",
     });
 
-    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredBuild } = await import("../src/index.ts");
     const result = await runConfiguredBuild(rootDir);
 
     expect(result.ok).toBe(false);
@@ -1234,7 +1235,7 @@ test("runConfiguredBuild rejects assetsDir that would recurse into the build out
         appTitle: "recursive assets",
     });
 
-    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredBuild } = await import("../src/index.ts");
     const result = await runConfiguredBuild(rootDir);
 
     expect(result.ok).toBe(false);
@@ -1259,7 +1260,7 @@ test("runConfiguredBuild rejects a symlinked assetsDir that resolves into the pr
         appTitle: "symlink assets",
     });
 
-    const { runConfiguredBuild } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredBuild } = await import("../src/index.ts");
     const result = await runConfiguredBuild(rootDir);
 
     expect(result.ok).toBe(false);
@@ -1433,7 +1434,7 @@ test("runConfiguredDevServer rejects htmlTemplate in config", async () =>
         ].join("\n"),
     );
 
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     expect(result.ok).toBe(false);
@@ -1496,7 +1497,7 @@ test("runConfiguredDevServer ignores src/index.html and injects the import map",
         ].join("\n"),
     );
 
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     if (!result.ok) {
@@ -1553,7 +1554,7 @@ test("runConfiguredDevServer serves the built-in html shell and injects the impo
         ].join("\n"),
     );
 
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     if (!result.ok) {
@@ -1608,7 +1609,7 @@ test("runConfiguredDevServer escapes appTitle in the dev html shell", async () =
         ].join("\n"),
     );
 
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     if (!result.ok) {
@@ -1654,7 +1655,7 @@ test("runConfiguredDevServer serves a generated bootstrap module without main.ts
 
     expect(existsSync(join(rootDir, "main.ts"))).toBe(false);
 
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     if (!result.ok) {
@@ -1758,7 +1759,7 @@ test("runConfiguredDevServer logs a recompiled asset report for changed componen
         ].join("\n"),
     );
 
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     if (!result.ok) {
@@ -1901,7 +1902,7 @@ test("runConfiguredDevServer logs only the changed component and excludes untouc
         ].join("\n"),
     );
 
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     if (!result.ok) {
@@ -1985,7 +1986,7 @@ test("runConfiguredDevServer logs a recompiled asset report for changed JavaScri
         ].join("\n"),
     );
 
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     if (!result.ok) {
@@ -2074,7 +2075,7 @@ test("runConfiguredDevServer watches directories whose names only contain exclud
         ].join("\n"),
     );
 
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     if (!result.ok) {
@@ -2151,7 +2152,7 @@ test("runConfiguredDevServer watches directories created after startup", async (
         ].join("\n"),
     );
 
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     if (!result.ok) {
@@ -2215,7 +2216,7 @@ test("runConfiguredDevServer rejects escaped project source paths and still serv
     symlinkSync(escapedSourcePath, join(rootDir, "src", "escaped.js"));
 
     const leakedPackageJson = readFileSync(join(process.cwd(), "package.json"), "utf8");
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     if (!result.ok) {
@@ -2267,7 +2268,7 @@ test("runConfiguredDevServer rejects escaped node_modules paths and still serves
     symlinkSync(escapedNodeModulesTarget, join(rootDir, "node_modules", "escaped.js"));
 
     const leakedPackageJson = readFileSync(join(process.cwd(), "package.json"), "utf8");
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     if (!result.ok) {
@@ -2314,7 +2315,7 @@ test("runConfiguredDevServer serves dev assets under /assets", async () =>
     writeFileSync(join(assetsDir, "banner.txt"), "banner from dev assets");
     writeConfiguredDevFixture(rootDir, { assetsDirLine: JSON.stringify(assetsDir), portLine: `    port: ${devPort},` });
 
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     if (!result.ok) {
@@ -2345,7 +2346,7 @@ test("runConfiguredDevServer rejects symlink dev assets that escape the assets r
     symlinkSync(join(rootDir, "leaked.txt"), join(assetsDir, "banner.txt"));
     writeConfiguredDevFixture(rootDir, { assetsDirLine: JSON.stringify(assetsDir), portLine: `    port: ${devPort},` });
 
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     if (!result.ok) {
@@ -2371,7 +2372,7 @@ test("runConfiguredDevServer fails when configured assetsDir is missing", async 
 
     writeConfiguredDevFixture(rootDir, { assetsDirLine: '"missing-assets"', portLine: `    port: ${devPort},` });
 
-    const { runConfiguredDevServer } = await import("../packages/bun-svelte-builder/src/index.ts");
+    const { runConfiguredDevServer } = await import("../src/index.ts");
     const result = await runConfiguredDevServer(rootDir);
 
     expect(result.ok).toBe(false);

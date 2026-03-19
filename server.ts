@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { runConfiguredDevServer } from "./packages/bun-svelte-builder/src/index";
+import { runConfiguredDevServer } from "./src/index";
 
 const DEFAULT_EXAMPLE_ROOT = join(import.meta.dir, "examples");
 
