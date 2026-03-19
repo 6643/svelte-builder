@@ -120,7 +120,13 @@ const formatExpectedBinarySize = (bytes: number): string => {
 
 const writeConfiguredBuildFixture = (
     rootDir: string,
-    options: { assetsDirLine: string; appColor: string; appTitle: string; sourcemapLine?: string },
+    options: {
+        assetsDirLine: string;
+        appColor: string;
+        appTitle: string;
+        sourcemapLine?: string;
+        stripSvelteDiagnosticsLine?: string;
+    },
 ): void => {
     mkdirSync(join(rootDir, "src"), { recursive: true });
     mkdirSync(join(rootDir, "assets"), { recursive: true });
@@ -153,6 +159,9 @@ const writeConfiguredBuildFixture = (
             "export default defineSvelteConfig({",
             `    assetsDir: ${options.assetsDirLine},`,
             options.sourcemapLine === undefined ? null : `    sourcemap: ${options.sourcemapLine},`,
+            options.stripSvelteDiagnosticsLine === undefined
+                ? null
+                : `    stripSvelteDiagnostics: ${options.stripSvelteDiagnosticsLine},`,
             "});",
         ]
             .filter((line): line is string => line !== null)
@@ -340,8 +349,62 @@ test("real demo app emits multiple lazy-loaded js chunks", async () => {
 
     expect(jsFiles.length).toBeGreaterThanOrEqual(3);
     expect(bundledCode).not.toContain("Intl.DateTimeFormat");
+    expect(bundledCode).not.toContain("Svelte error");
+    expect(bundledCode).not.toContain("A derived value cannot reference itself recursively");
+    expect(bundledCode).toContain('throw Error("derived_references_self")');
+    expect(bundledCode).toContain('console.warn("hydration_mismatch")');
+    expect(bundledCode).toContain('console.warn("state_proxy_equality_mismatch")');
+    expect(bundledCode).not.toContain('throw new Error("")');
+    expect(bundledCode).not.toContain('console.warn("")');
+    expect(bundledCode).not.toContain("Hydration failed because the initial UI does not match what was rendered on the server");
+});
+
+test("stripSvelteDiagnosticsModule preserves short diagnostics codes", async () => {
+    const { stripSvelteDiagnosticsModule } = await import("../src/strip-svelte-diagnostics.ts");
+
+    const errorsModule = stripSvelteDiagnosticsModule(
+        "export function derived_references_self() { throw Error(\"verbose\"); }",
+        "errors",
+    );
+    const warningsModule = stripSvelteDiagnosticsModule(
+        "export function hydration_mismatch(value) { console.warn(value); }",
+        "warnings",
+    );
+
+    expect(errorsModule).toBe('export function derived_references_self() { throw Error("derived_references_self"); }');
+    expect(warningsModule).toBe('export function hydration_mismatch(value) { console.warn("hydration_mismatch"); }');
+});
+
+test("stripSvelteDiagnosticsModule rejects unsupported export shapes", async () => {
+    const { stripSvelteDiagnosticsModule } = await import("../src/strip-svelte-diagnostics.ts");
+
+    expect(() => stripSvelteDiagnosticsModule("export const foo = 1;", "warnings")).toThrow(
+        "Unsupported Svelte warnings module shape for diagnostics stripping",
+    );
+});
+
+test("buildProduction can keep Svelte diagnostics when stripSvelteDiagnostics is disabled", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsp-keep-diagnostics-"));
+    createdDirs.push(rootDir);
+
+    cpSync(EXAMPLE_SRC, join(rootDir, "src"), { recursive: true });
+    cpSync(EXAMPLE_ASSETS, join(rootDir, "assets"), { recursive: true });
+
+    const result = await buildProduction({ rootDir, stripSvelteDiagnostics: false });
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    const outputFiles = readdirSync(result.value.outDir).sort();
+    const jsFiles = outputFiles.filter((file) => /^[a-f0-9]{16}\.js$/.test(file));
+    const bundledCode = jsFiles.map((file) => readFileSync(join(result.value.outDir, file), "utf8")).join("\n");
+
     expect(bundledCode).toContain("Svelte error");
     expect(bundledCode).toContain("A derived value cannot reference itself recursively");
+    expect(bundledCode).toContain("hydration_mismatch");
 });
 
 test("example workspace package contains the canonical demo source tree", async () => {
@@ -547,7 +610,7 @@ test("root scripts expose check commands and demo is documented as repo-local do
     expect(rootPackageJson.scripts?.typecheck).toBeDefined();
     expect(rootPackageJson.scripts?.check).toContain("bun run typecheck");
     expect(rootPackageJson.scripts?.check).toContain("bun test");
-    expect(examplePackageJson.dependencies?.["bun-svelte-builder"]).toBe("github:6643/bun-svelte-builder");
+    expect(examplePackageJson.dependencies?.["bun-svelte-builder"]).toBe("file:..");
     expect(examplePackageJson.scripts?.build).toBe("bun ./node_modules/.bin/bun-svelte-builder build");
     expect(examplePackageJson.scripts?.dev).toBe("bun ./node_modules/.bin/bun-svelte-builder dev");
     expect(rootReadme).toContain("`demo` 是仓库内 dogfood 示例");
@@ -692,6 +755,29 @@ test("runConfiguredBuild rejects non-boolean sourcemap config values", async () 
     }
 
     expect(result.error).toContain("Invalid sourcemap");
+});
+
+test("runConfiguredBuild rejects non-boolean stripSvelteDiagnostics config values", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsp-strip-diagnostics-invalid-"));
+    createdDirs.push(rootDir);
+
+    writeConfiguredBuildFixture(rootDir, {
+        assetsDirLine: '"assets"',
+        appColor: "salmon",
+        appTitle: "invalid diagnostics",
+        stripSvelteDiagnosticsLine: '"yes"',
+    });
+
+    const { runConfiguredBuild } = await import("../src/index.ts");
+    const result = await runConfiguredBuild(rootDir);
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        throw new Error("Expected build to reject a non-boolean stripSvelteDiagnostics value");
+    }
+
+    expect(result.error).toContain("stripSvelteDiagnostics");
 });
 
 test("buildSvelte generates the bootstrap module and respects mountId", async () => {

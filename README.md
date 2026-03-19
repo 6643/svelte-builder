@@ -33,6 +33,8 @@ HTML 一律使用内置 shell:
 | `assetsDir` | `"assets"` | 可选静态资源目录, dev 直接读, build 复制到 `dist/assets/` |
 | `outDir` | `"dist"` | 生产输出目录 |
 | `port` | `3000` | dev server 监听端口 |
+| `sourcemap` | `false` | 生产构建是否输出 inline sourcemap |
+| `stripSvelteDiagnostics` | `true` | 是否裁剪 Svelte 运行时详细诊断文案, 默认保留短错误码/警告码 |
 
 `appComponent` 是可选配置:
 
@@ -59,6 +61,22 @@ export default defineSvelteConfig({
 ```
 
 `assetsDir` 不配置时默认就是 `assets`。
+
+`stripSvelteDiagnostics` 是可选配置:
+
+```ts
+import { defineSvelteConfig } from "bun-svelte-builder";
+
+export default defineSvelteConfig({
+    stripSvelteDiagnostics: true,
+});
+```
+
+`stripSvelteDiagnostics` 的行为边界:
+
+- `true` 时, 构建器会拦截 Svelte internal 的 diagnostics 模块, 去掉长错误文案, 但保留短错误码/警告码, 例如 `derived_references_self`、`hydration_mismatch`
+- `false` 时, 保留 Svelte 原始运行时诊断实现, 方便调试或排查升级兼容性问题
+- 这个能力依赖 Svelte internal 模块路径与导出形式, 升级 Svelte 后应重新执行一次 `bun test` 和 `cd demo && bun run build` 做回归验证
 
 最小目录形态:
 
@@ -122,10 +140,11 @@ bun-svelte-builder build
 
 ```bash
 cd demo
+bun install
 bun run dev
 bun run build
 ```
 
-这组命令是仓库内 dogfood 工作流, 用于验证当前仓库源码与安装拓扑; 如果你是在自己的项目里使用本包, 应按上面的包依赖方式集成, 而不是复制 `demo` 的仓库内脚本。
+这组命令是仓库内 dogfood 工作流, 用于验证当前仓库源码与安装拓扑。`demo/package.json` 当前通过 `file:..` 依赖仓库根目录包, 因此修改 builder 源码后建议先执行一次 `bun install`, 再运行 `bun run dev` 或 `bun run build`。如果你是在自己的项目里使用本包, 应按上面的包依赖方式集成, 而不是复制 `demo` 的仓库内脚本。
 
 示例配置文件见 `demo/bun-svelte-builder.config.ts`。

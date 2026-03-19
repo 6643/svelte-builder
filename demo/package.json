@@ -3,7 +3,7 @@
     "private": true,
     "type": "module",
     "dependencies": {
-        "bun-svelte-builder": "github:6643/bun-svelte-builder",
+        "bun-svelte-builder": "file:..",
         "svelte": "next"
     },
     "scripts": {

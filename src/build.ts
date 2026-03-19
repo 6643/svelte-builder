@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { compile } from "svelte/compiler";
 import { createBootstrapSource, createImportPath } from "./bootstrap";
 import { copyConfiguredAssets, resolveConfiguredAssetsDir } from "./assets";
+import { stripSvelteDiagnosticsModule } from "./strip-svelte-diagnostics";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -42,6 +43,7 @@ export type BuildSvelteOptions = {
     outDir?: string;
     port?: number;
     rootDir?: string;
+    stripSvelteDiagnostics?: boolean;
     sourcemap?: boolean;
 };
 
@@ -235,6 +237,11 @@ const parseBuildConfig = (value: unknown): Result<BuildSvelteOptions> => {
         return sourcemap;
     }
 
+    const stripSvelteDiagnostics = readOptionalBooleanField(value, "stripSvelteDiagnostics");
+    if (!stripSvelteDiagnostics.ok) {
+        return stripSvelteDiagnostics;
+    }
+
     return ok({
         appTitle: appTitle.value,
         appComponent: appComponent.value,
@@ -242,6 +249,7 @@ const parseBuildConfig = (value: unknown): Result<BuildSvelteOptions> => {
         mountId: normalizedMountId.value,
         outDir: outDir.value,
         port: port.value,
+        stripSvelteDiagnostics: stripSvelteDiagnostics.value,
         sourcemap: sourcemap.value,
     });
 };
@@ -512,6 +520,35 @@ const compileSvelteModule = async (path: string): Promise<Result<{ css: string; 
         );
 };
 
+const createProductionEsmEnvPlugin = (): Bun.BunPlugin => ({
+    name: "production-esm-env-plugin",
+    target: "browser",
+    setup: (builder) => {
+        builder.onResolve({ filter: /^esm-env\/development$/ }, () => ({
+            namespace: "bun-svelte-builder-virtual",
+            path: "esm-env/development",
+        }));
+
+        builder.onLoad(
+            { filter: /^esm-env\/development$/, namespace: "bun-svelte-builder-virtual" },
+            () => ({
+                contents: "export default false;",
+                loader: "js",
+            }),
+        );
+
+        builder.onLoad({ filter: /internal\/client\/errors\.js$/ }, async ({ path }) => ({
+            contents: stripSvelteDiagnosticsModule(await Bun.file(path).text(), "errors"),
+            loader: "js",
+        }));
+
+        builder.onLoad({ filter: /internal\/client\/warnings\.js$/ }, async ({ path }) => ({
+            contents: stripSvelteDiagnosticsModule(await Bun.file(path).text(), "warnings"),
+            loader: "js",
+        }));
+    },
+});
+
 export const createSveltePlugin = (cssByPath: Map<string, string>): Bun.BunPlugin => ({
     name: "svelte-prod-plugin",
     target: "browser",
@@ -702,6 +739,7 @@ export const buildSvelte = async (options: BuildSvelteOptions = {}): Promise<Res
     const stageDir = createStageDir(rootDir, buildNonce);
     const tempOutDir = createTempOutDir(outDir, buildNonce);
     const assetsDir = await resolveConfiguredAssetsDir(rootDir, options.assetsDir ?? "assets");
+    const stripSvelteDiagnostics = options.stripSvelteDiagnostics ?? true;
     let lockPath: string | null = null;
     let published = false;
 
@@ -751,7 +789,9 @@ export const buildSvelte = async (options: BuildSvelteOptions = {}): Promise<Res
                 entry: "[hash].[ext]",
             },
             outdir: stageDir,
-            plugins: [createSveltePlugin(cssByPath)],
+            plugins: [stripSvelteDiagnostics ? createProductionEsmEnvPlugin() : null, createSveltePlugin(cssByPath)].filter(
+                (plugin): plugin is Bun.BunPlugin => plugin !== null,
+            ),
             sourcemap: resolveSourcemapMode(options.sourcemap),
             splitting: true,
             target: "browser",
