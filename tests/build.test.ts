@@ -359,7 +359,7 @@ test("example workspace package contains the canonical demo source tree", async 
     expect(configSource).toContain('appComponent: "src/App.svelte"');
     expect(configSource).toContain('appTitle: "Bun Svelte Builder"');
     expect(configSource).toContain('mountId: "app"');
-    expect(configSource).toContain('import { defineSvelteConfig } from "../src/index.ts"');
+    expect(configSource).toContain('import { defineSvelteConfig } from "bun-svelte-builder"');
     expect(appSource).toContain('src="/assets/panel-mark.svg"');
 });
 
@@ -507,7 +507,7 @@ test("package entry exports buildSvelte for reusable builds", async () => {
     expect(outputFiles).toContain("index.html");
 });
 
-test("root scripts expose check commands and examples stay runnable during source migration", () => {
+test("root scripts expose check commands and examples consume the installed root package", () => {
     const rootPackageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
         scripts?: Record<string, string>;
     };
@@ -519,9 +519,9 @@ test("root scripts expose check commands and examples stay runnable during sourc
     expect(rootPackageJson.scripts?.typecheck).toBeDefined();
     expect(rootPackageJson.scripts?.check).toContain("bun run typecheck");
     expect(rootPackageJson.scripts?.check).toContain("bun test");
-    expect(examplePackageJson.dependencies?.["bun-svelte-builder"]).toBeUndefined();
-    expect(examplePackageJson.scripts?.build).toBe("bun ../src/cli.ts build");
-    expect(examplePackageJson.scripts?.dev).toBe("bun ../src/cli.ts dev");
+    expect(examplePackageJson.dependencies?.["bun-svelte-builder"]).toBe("..");
+    expect(examplePackageJson.scripts?.build).toBe("bun ./node_modules/bun-svelte-builder/src/cli.ts build");
+    expect(examplePackageJson.scripts?.dev).toBe("bun ./node_modules/bun-svelte-builder/src/cli.ts dev");
 });
 
 test("repository root package exposes publish metadata and README positions it as the primary entry", () => {
@@ -547,8 +547,10 @@ test("repository root package exposes publish metadata and README positions it a
         test: "bun test",
         typecheck: "tsc -p tsconfig.json --noEmit",
     });
+    expect(existsSync(join(process.cwd(), "packages"))).toBe(false);
     expect(rootReadme).toContain("# bun-svelte-builder");
-    expect(rootReadme).toContain("当前生效的源码与包入口都在仓库根目录");
+    expect(rootReadme).not.toContain("packages/bun-svelte-builder/src");
+    expect(rootReadme).not.toContain("仍暂时保留");
 });
 
 test("buildProduction can emit inline sourcemaps when enabled in code", async () => {

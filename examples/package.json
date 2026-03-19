@@ -3,10 +3,11 @@
     "private": true,
     "type": "module",
     "dependencies": {
+        "bun-svelte-builder": "..",
         "svelte": "next"
     },
     "scripts": {
-        "build": "bun ../src/cli.ts build",
-        "dev": "bun ../src/cli.ts dev"
+        "build": "bun ./node_modules/bun-svelte-builder/src/cli.ts build",
+        "dev": "bun ./node_modules/bun-svelte-builder/src/cli.ts dev"
     }
 }

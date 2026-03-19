@@ -13,8 +13,8 @@
 ### Task 1: Add `appComponent` config parsing and a generated bootstrap source helper
 
 **Files:**
-- Create: `packages/bun-svelte-builder/src/bootstrap.ts`
-- Modify: `packages/bun-svelte-builder/src/build.ts`
+- Create: `src/bootstrap.ts`
+- Modify: `src/build.ts`
 - Modify: `tests/build.test.ts`
 
 - [ ] **Step 1: Write the failing test**
@@ -47,17 +47,17 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/bun-svelte-builder/src/bootstrap.ts packages/bun-svelte-builder/src/build.ts tests/build.test.ts
+git add src/bootstrap.ts src/build.ts tests/build.test.ts
 git commit -m "feat: add app component bootstrap config"
 ```
 
 ### Task 2: Switch build and dev to generated bootstrap modules and remove `main.ts`
 
 **Files:**
-- Modify: `packages/bun-svelte-builder/src/build.ts`
-- Modify: `packages/bun-svelte-builder/src/dev.ts`
-- Modify: `packages/bun-svelte-builder/src/index.ts`
-- Modify: `packages/bun-svelte-builder/src/runtime.ts`
+- Modify: `src/build.ts`
+- Modify: `src/dev.ts`
+- Modify: `src/index.ts`
+- Modify: `src/runtime.ts`
 - Delete: `examples/main.ts`
 - Modify: `tests/build.test.ts`
 
@@ -96,7 +96,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/bun-svelte-builder/src/build.ts packages/bun-svelte-builder/src/dev.ts packages/bun-svelte-builder/src/index.ts packages/bun-svelte-builder/src/runtime.ts examples/main.ts tests/build.test.ts
+git add src/build.ts src/dev.ts src/index.ts src/runtime.ts examples/main.ts tests/build.test.ts
 git commit -m "feat: generate spa bootstrap internally"
 ```
 
@@ -105,7 +105,7 @@ git commit -m "feat: generate spa bootstrap internally"
 **Files:**
 - Modify: `examples/bun-svelte-builder.config.ts`
 - Modify: `README.md`
-- Modify: `packages/bun-svelte-builder/README.md`
+- Modify: `README.md`
 - Modify: `docs/superpowers/specs/2026-03-18-app-component-bootstrap-design.md`
 
 - [ ] **Step 1: Update the docs**
@@ -124,7 +124,7 @@ Remove any remaining user-facing mention of a required `main.ts` file.
 
 Run:
 ```bash
-rg -n "main.ts|appComponent|mountId|appTitle|assetsDir|outDir|port|runtime" README.md packages/bun-svelte-builder/README.md examples/bun-svelte-builder.config.ts docs/superpowers/specs/2026-03-18-app-component-bootstrap-design.md
+rg -n "main.ts|appComponent|mountId|appTitle|assetsDir|outDir|port|runtime" README.md examples/bun-svelte-builder.config.ts docs/superpowers/specs/2026-03-18-app-component-bootstrap-design.md
 ```
 Expected:
 - `appComponent`, `mountId`, and `appTitle` should appear in the public docs
@@ -133,7 +133,7 @@ Expected:
 - [ ] **Step 3: Commit**
 
 ```bash
-git add README.md packages/bun-svelte-builder/README.md examples/bun-svelte-builder.config.ts docs/superpowers/specs/2026-03-18-app-component-bootstrap-design.md
+git add README.md examples/bun-svelte-builder.config.ts docs/superpowers/specs/2026-03-18-app-component-bootstrap-design.md
 git commit -m "docs: describe generated app bootstrap"
 ```
 

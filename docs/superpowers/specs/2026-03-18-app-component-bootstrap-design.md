@@ -72,12 +72,12 @@ The generated bootstrap uses the configured `appComponent` path and `mountId`. T
 
 Public-facing changes:
 
-- `packages/bun-svelte-builder/src/build.ts`
+- `src/build.ts`
   - parse `appComponent`, `mountId`, and `appTitle`
   - generate the internal bootstrap module
   - use `appTitle` in the built-in shell title
   - use `mountId` in shell generation
-- `packages/bun-svelte-builder/src/dev.ts`
+- `src/dev.ts`
   - serve the generated bootstrap module
   - use `mountId` and `appTitle` in the dev shell
 - `examples/main.ts`
@@ -86,13 +86,13 @@ Public-facing changes:
   - add `appComponent`
   - keep `mountId`
   - keep `appTitle`
-- `packages/bun-svelte-builder/src/runtime.ts`
+- `src/runtime.ts`
   - remove public runtime mount id export if it becomes unused
 
 Documentation:
 
 - `README.md`
-- `packages/bun-svelte-builder/README.md`
+- `README.md`
 
 ## Testing
 
