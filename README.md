@@ -147,4 +147,6 @@ bun run build
 
 这组命令是仓库内 dogfood 工作流, 用于验证当前仓库源码与安装拓扑。`demo/package.json` 当前通过 `file:..` 依赖仓库根目录包, 因此修改 builder 源码后建议先执行一次 `bun install`, 再运行 `bun run dev` 或 `bun run build`。如果你是在自己的项目里使用本包, 应按上面的包依赖方式集成, 而不是复制 `demo` 的仓库内脚本。
 
+`demo/package.json` 里的脚本当前保留为 `bun ./node_modules/.bin/bun-svelte-builder ...`, 而不是直接写 `bun-svelte-builder ...`。原因是这个仓库当前导出的 bin 仍由 Bun 解释执行 ESM 源文件, 直接把 `.bin/bun-svelte-builder` 当作 shell 命令执行会失败。换句话说, 这里的写法不是为了兼容 PATH, 而是为了显式要求 Bun 来执行这个 bin 入口。
+
 示例配置文件见 `demo/bun-svelte-builder.config.ts`。
