@@ -180,7 +180,20 @@ const getDevModuleMtime = (rootDir: string, modulePath: string): Result<number> 
     }
 };
 
+const resolveDevSourceRoot = (rootDir: string, appComponentPath: string): string => {
+    const relativeAppComponentPath = relative(rootDir, appComponentPath);
+    const segments = relativeAppComponentPath.split(/[\\/]/).filter((segment) => segment.length > 0);
+    const [topLevelDir] = segments;
+
+    if (topLevelDir === undefined || segments.length <= 1) {
+        return dirname(appComponentPath);
+    }
+
+    return topLevelDir === "src" ? join(rootDir, "src") : join(rootDir, topLevelDir);
+};
+
 export const resolveDevWatchRoots = (rootDir: string, assetsDir: string | undefined, appComponentPath: string): DevWatchRoot[] => {
+    const sourceRoot = resolveDevSourceRoot(rootDir, appComponentPath);
     const roots = new Map<string, DevWatchRoot>();
     const addRoot = (path: string, recursive: boolean) => {
         const existing = roots.get(path);
@@ -193,7 +206,7 @@ export const resolveDevWatchRoots = (rootDir: string, assetsDir: string | undefi
     };
 
     addRoot(rootDir, false);
-    addRoot(dirname(appComponentPath), true);
+    addRoot(sourceRoot, true);
     if (assetsDir !== undefined) {
         addRoot(assetsDir, true);
     }
@@ -413,7 +426,7 @@ const resolveDevRequestPath = async (
     rootDir: string,
     rawPathname: string,
     prefix: string,
-): Promise<Result<{ filePath: string; modulePath: string }>> => {
+): Promise<Result<{ filePath: string; modulePath: string; resolvedPath: string }>> => {
     const encodedPath = prefix === "/" ? rawPathname.slice(1) : rawPathname.slice(prefix.length);
     let decodedPath: string;
 
@@ -458,14 +471,14 @@ const resolveDevRequestPath = async (
                 return fail("Rejected path");
             }
 
-            return ok({ filePath, modulePath });
+            return ok({ filePath, modulePath, resolvedPath: realFilePath });
         } catch {
             return fail("Rejected path");
         }
     }
 
     if (!(await Bun.file(filePath).exists())) {
-        return ok({ filePath, modulePath });
+        return ok({ filePath, modulePath, resolvedPath: filePath });
     }
 
     const realRootDir = realpathSync(rootDir);
@@ -474,7 +487,7 @@ const resolveDevRequestPath = async (
         return fail("Rejected path");
     }
 
-    return ok({ filePath, modulePath });
+    return ok({ filePath, modulePath, resolvedPath: realFilePath });
 };
 
 export const findNodeModulesRoot = async (startDir: string): Promise<Result<string>> => {
@@ -531,16 +544,17 @@ const createCssInjection = (modulePath: string, cssCode: string | undefined): st
         return "";
     }
 
-    return `
-(() => {
-    const id = "${modulePath}";
-    if (!document.querySelector(\`style[data-svelte-id="\${id}"]\`)) {
-        const style = document.createElement("style");
-        style.setAttribute("data-svelte-id", id);
-        style.textContent = \`${cssCode}\`;
-        document.head.appendChild(style);
-    }
-})();`;
+    return [
+        "(() => {",
+        `    const id = ${JSON.stringify(modulePath)};`,
+        '    if (!document.querySelector(`style[data-svelte-id="${id}"]`)) {',
+        '        const style = document.createElement("style");',
+        '        style.setAttribute("data-svelte-id", id);',
+        `        style.textContent = ${JSON.stringify(cssCode)};`,
+        "        document.head.appendChild(style);",
+        "    }",
+        "})();",
+    ].join("\n");
 };
 
 const compileSvelteForDev = async (rootDir: string, modulePath: string, shouldLog = false): Promise<Result<string>> => {
@@ -663,6 +677,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
     if (appComponentRelativeToRoot.startsWith("..") || isAbsolute(appComponentRelativeToRoot)) {
         return fail(`Invalid appComponent in bun-svelte-builder.config.ts: expected a path inside the project root.`);
     }
+    const sourceRoot = resolveDevSourceRoot(rootDir, appComponentPath);
     const assetsDir = await resolveConfiguredAssetsDir(rootDir, config.value.assetsDir);
     if (!assetsDir.ok) {
         return assetsDir;
@@ -748,6 +763,10 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                     return new Response("Not Found", { status: 404 });
                 }
 
+                if (!isPathInsideRoot(sourceRoot, resolvedSourcePath.value.resolvedPath)) {
+                    return new Response("Not Found", { status: 404 });
+                }
+
                 const transpiled = await loadDevModule(rootDir, resolvedSourcePath.value.modulePath, reloadHub.cache);
                 if (!transpiled.ok) {
                     return transpiled.error.startsWith("Missing file:")
@@ -766,6 +785,10 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                     return new Response("Not Found", { status: 404 });
                 }
 
+                if (!isPathInsideRoot(sourceRoot, resolvedSourcePath.value.resolvedPath)) {
+                    return new Response("Not Found", { status: 404 });
+                }
+
                 const source = await loadDevModule(rootDir, resolvedSourcePath.value.modulePath, reloadHub.cache);
                 if (!source.ok) {
                     return source.error.startsWith("Missing file:") ? createNotFoundResponse() : new Response(source.error, { status: 500 });
@@ -779,6 +802,10 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
             if (rawPathname.endsWith(".svelte")) {
                 const resolvedSourcePath = await resolveDevRequestPath(rootDir, rawPathname, "/");
                 if (!resolvedSourcePath.ok) {
+                    return new Response("Not Found", { status: 404 });
+                }
+
+                if (!isPathInsideRoot(sourceRoot, resolvedSourcePath.value.resolvedPath)) {
                     return new Response("Not Found", { status: 404 });
                 }
 

@@ -4,6 +4,8 @@ Minimal Bun + Svelte 5 production build preset.
 
 `demo` 是仓库内 dogfood 示例, 用来验证当前仓库里的构建器行为和回归场景, 不作为发布包消费者模板。
 
+当前仓库本身就是发布包源码仓库, 不是 monorepo 子包。README 中的路径、命令和配置说明都以仓库根目录为准。
+
 它保留独立项目形态, 包含 `src/`、`assets/`、`bun-svelte-builder.config.ts` 和 `package.json`。入口由构建器根据 `appComponent` 自动生成, 不再需要手写 `main.ts`。
 
 统一配置文件名是 `bun-svelte-builder.config.ts`。
@@ -23,6 +25,12 @@ HTML 一律使用内置 shell:
 - 默认根容器固定为 `<main id="app"></main>`
 - 默认标题固定为 `Bun Svelte Builder`
 
+dev 源码边界:
+
+- dev 只直接暴露源码树里的 `.ts`、`.js`、`.svelte` 模块, 不直接暴露项目根上的 `bun-svelte-builder.config.ts`、测试文件或其他脚本
+- 若 `appComponent` 位于 `src/` 下的更深层目录, dev 仍会回收到 `src/` 作为源码服务和 watch 根
+- 若 `appComponent` 位于其他顶级源码目录, dev 会以该顶级目录作为源码服务和 watch 根
+
 公共配置与默认值:
 
 | 配置 | 默认值 | 说明 |
@@ -31,7 +39,7 @@ HTML 一律使用内置 shell:
 | `mountId` | `"app"` | 只支持 DOM `id`, build/dev 都会把它写进内置 shell |
 | `appTitle` | `"Bun Svelte Builder"` | 内置 shell 的 `<title>` |
 | `assetsDir` | `"assets"` | 可选静态资源目录, dev 直接读, build 复制到 `dist/assets/` |
-| `outDir` | `"dist"` | 生产输出目录 |
+| `outDir` | `"dist"` | 生产输出目录, 必须是项目根内的独立目录, 不能指向项目根或覆盖源码树 |
 | `port` | `3000` | dev server 监听端口 |
 | `sourcemap` | `false` | 生产构建是否输出 inline sourcemap |
 | `stripSvelteDiagnostics` | `true` | 是否裁剪 Svelte 运行时详细诊断文案, 默认保留短错误码/警告码 |
@@ -121,6 +129,7 @@ src/lazy/ButtonDemo.svelte   2026-03-18 11:11:11  4.1 KiB  1.9 KiB
 
 - 最终产物直接写入当前项目的 `<outDir>/`
 - 同一输出目录只允许一个构建进程写入
+- `outDir` 必须位于项目根目录内, 且必须是独立输出目录, 不能配置为 `.` 或覆盖 `appComponent` 所在源码树
 - 若检测到失效的 `dist.lock`, 构建会自动回收后继续
 
 安装依赖:

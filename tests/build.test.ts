@@ -504,6 +504,17 @@ test("dev watch roots stay focused on source, assets, and root-level entry files
     ]);
 });
 
+test("dev watch roots expand to the source tree for nested app components", async () => {
+    const { resolveDevWatchRoots } = await import("../src/dev.ts");
+
+    const roots = resolveDevWatchRoots("/repo", undefined, "/repo/src/app/App.svelte");
+
+    expect(roots).toEqual([
+        { path: "/repo", recursive: false },
+        { path: "/repo/src", recursive: true },
+    ]);
+});
+
 test("dev watcher surfaces non-trivial errors and ignores transient missing-file races", async () => {
     const { formatDevWatcherIssue } = await import("../src/dev.ts");
 
@@ -1029,6 +1040,25 @@ test("runConfiguredBuild loads bun-svelte-builder.config.ts and custom outDir", 
     expect(html).toContain("<title>Custom Build Title</title>");
     expect(html).toContain('<html lang="en">');
     expect(html).toContain('<main id="app"></main>');
+});
+
+test("buildSvelte rejects outDir that resolves to the project root", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-outdir-root-"));
+    createdDirs.push(rootDir);
+
+    writeRuntimeAwareFixture(rootDir);
+
+    const { buildSvelte } = await import("../src/index.ts");
+    const result = await buildSvelte({ rootDir, outDir: "." });
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        throw new Error("Expected buildSvelte to reject outDir that resolves to the project root");
+    }
+
+    expect(result.error).toContain("outDir");
+    expect(result.error).toMatch(/inside the project root|dedicated build output directory/i);
 });
 
 test("runConfiguredBuild ignores rootDir in bun-svelte-builder.config.ts", async () => {
@@ -1818,6 +1848,76 @@ test("runConfiguredDevServer serves a generated bootstrap module without main.ts
     expect(source).toContain('import App from "./src/Alt.svelte"');
     expect(source).toContain('document.getElementById("root")');
     expect(source).not.toContain(')!');
+    }));
+
+test("runConfiguredDevServer rejects direct access to root-level config source files", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-config-exposure-"));
+    createdDirs.push(rootDir);
+
+    writeConfiguredDevFixture(rootDir, { portLine: `    port: ${devPort},` });
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    const response = await requestDevServerPath(result.value.port, "/bun-svelte-builder.config.ts");
+
+    await result.value.stop();
+
+    expect(response.status).toBe(404);
+    expect(response.body).toContain("Not Found");
+    }));
+
+test("runConfiguredDevServer serves Svelte modules whose CSS contains template literal metacharacters", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-css-escape-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(
+        join(rootDir, "src", "App.svelte"),
+        [
+            "<h1>css escape</h1>",
+            "",
+            "<style>",
+            '  h1::after { content: "`"; }',
+            '  h1::before { content: "${value}"; }',
+            "</style>",
+        ].join("\n"),
+    );
+
+    writeFileSync(
+        join(rootDir, "bun-svelte-builder.config.ts"),
+        [
+            'import { defineSvelteConfig } from "bun-svelte-builder";',
+            "",
+            "export default defineSvelteConfig({",
+            `    port: ${devPort},`,
+            "});",
+        ].join("\n"),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    const response = await requestDevServerPath(result.value.port, "/src/App.svelte");
+
+    await result.value.stop();
+
+    expect(response.status).toBe(200);
+    expect(() => new Bun.Transpiler({ loader: "js" }).transformSync(response.body)).not.toThrow();
     }));
 
 test("runConfiguredDevServer logs a recompiled asset report for changed components", async () =>

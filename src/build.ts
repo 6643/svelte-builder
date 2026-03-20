@@ -85,6 +85,12 @@ const hasOwnProperty = (value: object, key: string): boolean => Object.prototype
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
+const isPathWithinRoot = (rootPath: string, candidatePath: string): boolean => {
+    const relativePath = relative(rootPath, candidatePath);
+
+    return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+};
+
 const resolveConfiguredPath = (rootDir: string, value: string | undefined, fallback: string): string => {
     const target = value ?? fallback;
     return isAbsolute(target) ? target : join(rootDir, target);
@@ -186,6 +192,24 @@ const validateAppComponent = (value: unknown, field: string): Result<string> => 
     }
 
     return ok(normalizedAppComponent);
+};
+
+const validateOutDir = (
+    rootDir: string,
+    outDir: string,
+    appComponentPath: string,
+): Result<string> => {
+    if (!isPathWithinRoot(rootDir, outDir) || outDir === rootDir) {
+        return fail(
+            `Invalid outDir in ${CONFIG_FILE_NAME}: expected a dedicated build output directory inside the project root.`,
+        );
+    }
+
+    if (isPathWithinRoot(outDir, appComponentPath)) {
+        return fail(`Invalid outDir in ${CONFIG_FILE_NAME}: outDir must not overlap the appComponent source tree.`);
+    }
+
+    return ok(outDir);
 };
 
 const parseBuildConfig = (value: unknown): Result<BuildSvelteOptions> => {
@@ -719,7 +743,7 @@ const writeIndexHtml = async (
 };
 
 export const buildSvelte = async (options: BuildSvelteOptions = {}): Promise<Result<BuildArtifacts>> => {
-    const rootDir = options.rootDir ?? process.cwd();
+    const rootDir = resolve(options.rootDir ?? process.cwd());
     const outDir = resolveConfiguredPath(rootDir, options.outDir, "dist");
     const mountId = validateMountId(options.mountId, "mountId");
     if (!mountId.ok) {
@@ -736,8 +760,6 @@ export const buildSvelte = async (options: BuildSvelteOptions = {}): Promise<Res
     }
     const appTitle = options.appTitle ?? DEFAULT_HTML_SHELL.title;
     const buildNonce = createBuildNonce();
-    const stageDir = createStageDir(rootDir, buildNonce);
-    const tempOutDir = createTempOutDir(outDir, buildNonce);
     const assetsDir = await resolveConfiguredAssetsDir(rootDir, options.assetsDir ?? "assets");
     const stripSvelteDiagnostics = options.stripSvelteDiagnostics ?? true;
     let lockPath: string | null = null;
@@ -747,12 +769,20 @@ export const buildSvelte = async (options: BuildSvelteOptions = {}): Promise<Res
         return fail(assetsDir.error);
     }
 
+    const validatedOutDir = validateOutDir(rootDir, outDir, appComponentPath);
+    if (!validatedOutDir.ok) {
+        return validatedOutDir;
+    }
+
+    const stageDir = createStageDir(rootDir, buildNonce);
+    const tempOutDir = createTempOutDir(validatedOutDir.value, buildNonce);
+
     const entryExists = await Bun.file(appComponentPath).exists();
     if (!entryExists) {
         return fail(`Missing SPA app component: ${appComponentPath}`);
     }
 
-    const lock = await acquirePublishLock(rootDir, outDir);
+    const lock = await acquirePublishLock(rootDir, validatedOutDir.value);
     if (!lock.ok) {
         return lock;
     }
@@ -844,7 +874,7 @@ export const buildSvelte = async (options: BuildSvelteOptions = {}): Promise<Res
             }
         }
 
-        const publishedOutDir = await publishBuildOutput(rootDir, tempOutDir, outDir);
+        const publishedOutDir = await publishBuildOutput(rootDir, tempOutDir, validatedOutDir.value);
         if (!publishedOutDir.ok) {
             return publishedOutDir;
         }
@@ -854,7 +884,7 @@ export const buildSvelte = async (options: BuildSvelteOptions = {}): Promise<Res
             cssFile: cssFile.value,
             htmlFile: htmlFile.value,
             jsFile: entryAsset.finalFile,
-            outDir,
+            outDir: validatedOutDir.value,
         });
     } finally {
         await rm(stageDir, { force: true, recursive: true }).catch(() => undefined);
