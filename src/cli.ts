@@ -21,6 +21,6 @@ if (command === "build") {
 
     console.log(`Serving http://localhost:${result.value.port}`);
 } else {
-    console.error("Usage: bun-svelte-builder <build|dev>");
+    console.error("Usage: svelte-builder <build|dev>");
     process.exit(1);
 }

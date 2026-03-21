@@ -231,7 +231,7 @@ export const formatDevWatcherIssue = (context: string, error: unknown): string |
         return undefined;
     }
 
-    return `[bun-svelte-builder] ${context}: ${getErrorMessage(error)}`;
+    return `[svelte-builder] ${context}: ${getErrorMessage(error)}`;
 };
 
 const reportDevWatcherIssue = (context: string, error: unknown): void => {
@@ -879,11 +879,11 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
 
     const rootDir = config.value.rootDir ?? cwd;
     const mountId = config.value.mountId ?? "app";
-    const appTitle = config.value.appTitle ?? "Bun Svelte Builder";
+    const appTitle = config.value.appTitle ?? "Svelte Builder";
     const appComponentPath = resolveConfiguredPath(rootDir, config.value.appComponent, "src/App.svelte");
     const appComponentRelativeToRoot = relative(rootDir, appComponentPath);
     if (appComponentRelativeToRoot.startsWith("..") || isAbsolute(appComponentRelativeToRoot)) {
-        return fail(`Invalid appComponent in bun-svelte-builder.config.ts: expected a path inside the project root.`);
+        return fail(`Invalid appComponent in svelte-builder.config.ts: expected a path inside the project root.`);
     }
     const sourceRoot = resolveDevSourceRoot(rootDir, appComponentPath);
     const sourcePathPrefix = (() => {

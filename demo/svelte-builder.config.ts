@@ -1,8 +1,8 @@
-import { defineSvelteConfig } from "bun-svelte-builder";
+import { defineSvelteConfig } from "svelte-builder";
 
 export default defineSvelteConfig({
     appComponent: "src/App.svelte",
     assetsDir: "assets",
-    appTitle: "Bun Svelte Builder",
+    appTitle: "Svelte Builder",
     mountId: "app",
 });

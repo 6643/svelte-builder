@@ -1,4 +1,4 @@
-# bun-svelte-builder
+# svelte-builder
 
 Minimal Bun + Svelte 5 production build preset.
 
@@ -6,9 +6,9 @@ Minimal Bun + Svelte 5 production build preset.
 
 当前仓库本身就是发布包源码仓库, 不是 monorepo 子包。README 中的路径、命令和配置说明都以仓库根目录为准。
 
-它保留独立项目形态, 包含 `src/`、`assets/`、`bun-svelte-builder.config.ts` 和 `package.json`。入口由构建器根据 `appComponent` 自动生成, 不再需要手写 `main.ts`。
+它保留独立项目形态, 包含 `src/`、`assets/`、`svelte-builder.config.ts` 和 `package.json`。入口由构建器根据 `appComponent` 自动生成, 不再需要手写 `main.ts`。
 
-统一配置文件名是 `bun-svelte-builder.config.ts`。
+统一配置文件名是 `svelte-builder.config.ts`。
 
 这个 builder 只支持 SPA:
 
@@ -23,11 +23,11 @@ HTML 一律使用内置 shell:
 - build/dev 都不读取 `src/index.html`
 - `htmlTemplate` 已删除
 - 默认根容器固定为 `<main id="app"></main>`
-- 默认标题固定为 `Bun Svelte Builder`
+- 默认标题固定为 `Svelte Builder`
 
 dev 源码边界:
 
-- dev 只直接暴露源码树里的 `.ts`、`.js`、`.svelte` 模块, 不直接暴露项目根上的 `bun-svelte-builder.config.ts`、测试文件或其他脚本
+- dev 只直接暴露源码树里的 `.ts`、`.js`、`.svelte` 模块, 不直接暴露项目根上的 `svelte-builder.config.ts`、测试文件或其他脚本
 - 若 `appComponent` 位于 `src/` 下的更深层目录, dev 仍会回收到 `src/` 作为源码服务和 watch 根
 - 若 `appComponent` 位于其他顶级源码目录, dev 会以该顶级目录作为源码服务和 watch 根
 
@@ -37,7 +37,7 @@ dev 源码边界:
 | --- | --- | --- |
 | `appComponent` | `"src/App.svelte"` | SPA 根组件, build/dev 都会据此生成内部 bootstrap |
 | `mountId` | `"app"` | 只支持 DOM `id`, build/dev 都会把它写进内置 shell |
-| `appTitle` | `"Bun Svelte Builder"` | 内置 shell 的 `<title>` |
+| `appTitle` | `"Svelte Builder"` | 内置 shell 的 `<title>` |
 | `assetsDir` | `"assets"` | 可选静态资源目录, dev 直接读, build 复制到 `dist/assets/` |
 | `outDir` | `"dist"` | 生产输出目录, 必须是项目根内的独立目录, 不能指向项目根或覆盖源码树 |
 | `port` | `3000` | dev server 监听端口 |
@@ -47,11 +47,11 @@ dev 源码边界:
 `appComponent` 是可选配置:
 
 ```ts
-import { defineSvelteConfig } from "bun-svelte-builder";
+import { defineSvelteConfig } from "svelte-builder";
 
 export default defineSvelteConfig({
     appComponent: "src/App.svelte",
-    appTitle: "Bun Svelte Builder",
+    appTitle: "Svelte Builder",
 });
 ```
 
@@ -60,11 +60,11 @@ export default defineSvelteConfig({
 `assetsDir` 是可选配置:
 
 ```ts
-import { defineSvelteConfig } from "bun-svelte-builder";
+import { defineSvelteConfig } from "svelte-builder";
 
 export default defineSvelteConfig({
     assetsDir: "assets",
-    appTitle: "Bun Svelte Builder",
+    appTitle: "Svelte Builder",
 });
 ```
 
@@ -73,7 +73,7 @@ export default defineSvelteConfig({
 `stripSvelteDiagnostics` 是可选配置:
 
 ```ts
-import { defineSvelteConfig } from "bun-svelte-builder";
+import { defineSvelteConfig } from "svelte-builder";
 
 export default defineSvelteConfig({
     stripSvelteDiagnostics: true,
@@ -93,7 +93,7 @@ demo/
   src/
     App.svelte
   assets/
-  bun-svelte-builder.config.ts
+  svelte-builder.config.ts
 ```
 
 静态资源语义固定为 `/assets/*`:
@@ -141,8 +141,8 @@ bun install
 作为项目依赖使用:
 
 ```bash
-bun-svelte-builder dev
-bun-svelte-builder build
+svelte-builder dev
+svelte-builder build
 ```
 
 在这个仓库里运行 demo:
@@ -156,6 +156,6 @@ bun run build
 
 这组命令是仓库内 dogfood 工作流, 用于验证当前仓库源码与安装拓扑。`demo/package.json` 当前通过 `file:..` 依赖仓库根目录包, 因此修改 builder 源码后建议先执行一次 `bun install`, 再运行 `bun run dev` 或 `bun run build`。如果你是在自己的项目里使用本包, 应按上面的包依赖方式集成, 而不是复制 `demo` 的仓库内脚本。
 
-`demo/package.json` 里的脚本当前保留为 `bun ./node_modules/.bin/bun-svelte-builder ...`, 而不是直接写 `bun-svelte-builder ...`。原因是这个仓库当前导出的 bin 仍由 Bun 解释执行 ESM 源文件, 直接把 `.bin/bun-svelte-builder` 当作 shell 命令执行会失败。换句话说, 这里的写法不是为了兼容 PATH, 而是为了显式要求 Bun 来执行这个 bin 入口。
+`demo/package.json` 里的脚本当前保留为 `bun ./node_modules/.bin/svelte-builder ...`, 而不是直接写 `svelte-builder ...`。原因是这个仓库当前导出的 bin 仍由 Bun 解释执行 ESM 源文件, 直接把 `.bin/svelte-builder` 当作 shell 命令执行会失败。换句话说, 这里的写法不是为了兼容 PATH, 而是为了显式要求 Bun 来执行这个 bin 入口。
 
-示例配置文件见 `demo/bun-svelte-builder.config.ts`。
+示例配置文件见 `demo/svelte-builder.config.ts`。

@@ -1,13 +1,13 @@
 {
-    "name": "bun-svelte-builder-example",
+    "name": "svelte-builder-example",
     "private": true,
     "type": "module",
     "dependencies": {
-        "bun-svelte-builder": "file:..",
+        "svelte-builder": "file:..",
         "svelte": "next"
     },
     "scripts": {
-        "build": "bun ./node_modules/.bin/bun-svelte-builder build",
-        "dev": "bun ./node_modules/.bin/bun-svelte-builder dev"
+        "build": "bun ./node_modules/.bin/svelte-builder build",
+        "dev": "bun ./node_modules/.bin/svelte-builder dev"
     }
 }

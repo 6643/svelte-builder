@@ -17,7 +17,7 @@
 
 - `demo/package.json` 当前通过 `file:..` 引用仓库根目录包, 使 demo 构建直接验证当前源码版本
 - README 新增 `stripSvelteDiagnostics` 配置说明、行为边界、升级风险与 demo dogfood 说明
-- README 明确解释 `demo` 为什么显式使用 `bun ./node_modules/.bin/bun-svelte-builder ...`
+- README 明确解释 `demo` 为什么显式使用 `bun ./node_modules/.bin/svelte-builder ...`
 
 ## Verification
 

@@ -50,14 +50,14 @@ export type BuildSvelteOptions = {
 export const DEFAULT_HTML_SHELL: HtmlShell = {
     appHtml: '<main id="app"></main>',
     lang: "en",
-    title: "Bun Svelte Builder",
+    title: "Svelte Builder",
 };
 const FINAL_HASH_HEX_LENGTH = 16;
 const MAX_JS_HASH_STABILIZATION_PASSES = 32;
 const STAGE_OUTDIR_NAME = ".bsp-stage";
 const TEMP_OUTDIR_NAME = "bsp-out";
 const RELEASES_DIR_NAME = ".bsp-releases";
-const CONFIG_FILE_NAME = "bun-svelte-builder.config.ts";
+const CONFIG_FILE_NAME = "svelte-builder.config.ts";
 
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 
@@ -549,12 +549,12 @@ const createProductionEsmEnvPlugin = (): Bun.BunPlugin => ({
     target: "browser",
     setup: (builder) => {
         builder.onResolve({ filter: /^esm-env\/development$/ }, () => ({
-            namespace: "bun-svelte-builder-virtual",
+            namespace: "svelte-builder-virtual",
             path: "esm-env/development",
         }));
 
         builder.onLoad(
-            { filter: /^esm-env\/development$/, namespace: "bun-svelte-builder-virtual" },
+            { filter: /^esm-env\/development$/, namespace: "svelte-builder-virtual" },
             () => ({
                 contents: "export default false;",
                 loader: "js",

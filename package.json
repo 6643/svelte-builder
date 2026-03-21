@@ -1,16 +1,16 @@
 {
-    "name": "bun-svelte-builder",
+    "name": "svelte-builder",
     "version": "0.0.0",
     "description": "Minimal Bun + Svelte 5 production build preset.",
     "bin": {
-        "bun-svelte-builder": "./src/cli.ts"
+        "svelte-builder": "./src/cli.ts"
     },
     "module": "./src/index.ts",
     "type": "module",
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/6643/bun-svelte-builder.git"
+        "url": "git+https://github.com/6643/svelte-builder.git"
     },
     "exports": {
         ".": "./src/index.ts",
@@ -32,7 +32,7 @@
     },
     "peerDependencies": {
         "svelte": "next",
-        "typescript": "^5.9.3"
+        "typescript": "latest"
     },
     "scripts": {
         "build": "bun run build.ts",
