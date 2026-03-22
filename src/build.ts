@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { lstatSync, realpathSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { compile } from "svelte/compiler";
@@ -60,15 +61,31 @@ const RELEASES_DIR_NAME = ".bsp-releases";
 const CONFIG_FILE_NAME = "svelte-builder.config.ts";
 const CONFIG_LOADER_EVAL = [
     'const { pathToFileURL } = await import("node:url");',
+    "const hasOwnProperty = (value, key) => Object.prototype.hasOwnProperty.call(value, key);",
+    "const selectSerializableConfig = (loaded) => {",
+    '    if (typeof loaded !== "object" || loaded === null || Array.isArray(loaded)) {',
+    "        return loaded;",
+    "    }",
+    "    const selected = {};",
+    '    for (const key of ["appTitle", "appComponent", "assetsDir", "outDir", "mountId", "port", "sourcemap", "stripSvelteDiagnostics"]) {',
+    "        if (hasOwnProperty(loaded, key)) {",
+    "            selected[key] = loaded[key];",
+    "        }",
+    "    }",
+    '    if (hasOwnProperty(loaded, "htmlTemplate")) {',
+    "        selected.htmlTemplate = true;",
+    "    }",
+    "    return selected;",
+    "};",
     "const configPath = process.argv[1];",
     "try {",
     "    const module = await import(pathToFileURL(configPath).href);",
     "    const loaded = module.default ?? module.config;",
     "    if (loaded === undefined) {",
-    '        console.error("Missing default export");',
-    "        process.exit(2);",
+        '        console.error("Missing default export");',
+        "        process.exit(2);",
     "    }",
-    "    const serialized = JSON.stringify(loaded);",
+    "    const serialized = JSON.stringify(selectSerializableConfig(loaded));",
     "    if (serialized === undefined) {",
     '        console.error("Config is not JSON-serializable");',
     "        process.exit(3);",
@@ -414,8 +431,44 @@ const isPidAlive = (pid: number): boolean => {
     }
 };
 
+const resolveLegacyReleaseTarget = (rootDir: string, outDir: string): string | undefined => {
+    const releasesDir = join(rootDir, RELEASES_DIR_NAME);
+
+    try {
+        if (!lstatSync(outDir).isSymbolicLink()) {
+            return undefined;
+        }
+
+        const resolvedOutDir = realpathSync(outDir);
+        if (!isPathWithinRoot(releasesDir, resolvedOutDir) || resolvedOutDir === releasesDir) {
+            return undefined;
+        }
+
+        return resolvedOutDir;
+    } catch {
+        return undefined;
+    }
+};
+
+const cleanupLegacyReleaseTarget = async (rootDir: string, releaseTarget: string | undefined): Promise<void> => {
+    if (releaseTarget === undefined) {
+        return;
+    }
+
+    await rm(releaseTarget, { force: true, recursive: true }).catch(() => undefined);
+
+    const releasesDir = join(rootDir, RELEASES_DIR_NAME);
+    await readdir(releasesDir)
+        .then(async (entries) => {
+            if (entries.length === 0) {
+                await rm(releasesDir, { force: true, recursive: true }).catch(() => undefined);
+            }
+        })
+        .catch(() => undefined);
+};
+
 const cleanupRecoveredBuildState = async (rootDir: string, outDir: string): Promise<void> => {
-    await rm(join(rootDir, RELEASES_DIR_NAME), { force: true, recursive: true }).catch(() => undefined);
+    await cleanupLegacyReleaseTarget(rootDir, resolveLegacyReleaseTarget(rootDir, outDir));
 
     await readdir(rootDir)
         .then((entries) =>
@@ -510,6 +563,7 @@ const acquirePublishLock = async (rootDir: string, outDir: string, allowRetry = 
 };
 
 const publishBuildOutput = async (rootDir: string, tempOutDir: string, outDir: string): Promise<Result<string>> => {
+    const legacyReleaseTarget = resolveLegacyReleaseTarget(rootDir, outDir);
     const cleared = await rm(outDir, { force: true, recursive: true }).then(
         () => ok(outDir),
         (error) => fail(`Failed to clear ${outDir}: ${getErrorMessage(error)}`),
@@ -526,7 +580,7 @@ const publishBuildOutput = async (rootDir: string, tempOutDir: string, outDir: s
         return published;
     }
 
-    await rm(join(rootDir, RELEASES_DIR_NAME), { force: true, recursive: true }).catch(() => undefined);
+    await cleanupLegacyReleaseTarget(rootDir, legacyReleaseTarget);
     return published;
 };
 

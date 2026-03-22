@@ -1605,6 +1605,34 @@ test("buildProduction stale lock recovery preserves unrelated stage directories"
     expect(readFileSync(join(unrelatedStageDir, "sentinel.txt"), "utf8")).toBe("keep-me");
 });
 
+test("buildProduction stale lock recovery preserves unrelated legacy release directories", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-stale-lock-releases-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    mkdirSync(join(rootDir, ".bsp-releases", "foreign-release"), { recursive: true });
+    mkdirSync(join(rootDir, "dist.lock"), { recursive: true });
+
+    writeFileSync(
+        join(rootDir, "src", "App.svelte"),
+        ["<h1>stale releases</h1>", "", "<style>", "  h1 { color: darkcyan; }", "</style>"].join("\n"),
+    );
+
+    writeFileSync(join(rootDir, ".bsp-releases", "foreign-release", "sentinel.txt"), "keep-release");
+    writeFileSync(join(rootDir, "dist.lock", "owner.json"), JSON.stringify({ pid: 999999 }));
+
+    const result = await buildProduction({ rootDir });
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    expect(existsSync(join(rootDir, ".bsp-releases", "foreign-release"))).toBe(true);
+    expect(readFileSync(join(rootDir, ".bsp-releases", "foreign-release", "sentinel.txt"), "utf8")).toBe("keep-release");
+});
+
 test("loadSvelteConfig reloads updated config from the same cwd", async () => {
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-reload-"));
     createdDirs.push(rootDir);
@@ -1634,6 +1662,26 @@ test("loadSvelteConfig reloads updated config from the same cwd", async () => {
 
     expect(first.value.appTitle).toBe("first");
     expect(second.value.appTitle).toBe("second");
+});
+
+test("loadSvelteConfig ignores non-serializable unknown fields", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-unknown-field-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>config unknown field</h1>");
+    writeFileSync(join(rootDir, "svelte-builder.config.ts"), 'export default { appTitle: "ok", futureFlag: 1n };');
+
+    const { loadSvelteConfig } = await import("../src/build.ts");
+    const result = await loadSvelteConfig(rootDir);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    expect(result.value.appTitle).toBe("ok");
 });
 
 test("runConfiguredDevServer rejects htmlTemplate in config", async () =>
