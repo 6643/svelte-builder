@@ -6,14 +6,11 @@ Minimal Bun + Svelte 5 production build preset.
 
 当前仓库本身就是发布包源码仓库, 不是 monorepo 子包。README 中的路径、命令和配置说明都以仓库根目录为准。
 
-它保留独立项目形态, 包含 `src/`、`assets/`、`svelte-builder.config.json`（或兼容的 `svelte-builder.config.ts`）和 `package.json`。入口由构建器根据 `appComponent` 自动生成, 不再需要手写 `main.ts`。
+它保留独立项目形态, 包含 `src/`、`assets/`、`svelte-builder.config.json` 和 `package.json`。入口由构建器根据 `appComponent` 自动生成, 不再需要手写 `main.ts`。
 
-统一配置文件名优先级:
+统一配置文件名是 `svelte-builder.config.json`。
 
-- 优先读取 `svelte-builder.config.json`
-- 若不存在, 回退到 `svelte-builder.config.ts`
-- `svelte-builder.config.json` 是纯数据配置, 不执行项目代码
-- `svelte-builder.config.ts` 是可执行模块配置, 加载时会执行顶层代码, 仅适合可信项目
+配置是纯 JSON, 不执行项目代码。旧的 `svelte-builder.config.ts` 已不再支持; 如果你仍在使用它, 请迁移为 `svelte-builder.config.json`。
 
 这个 builder 只支持 SPA:
 
@@ -32,7 +29,7 @@ HTML 一律使用内置 shell:
 
 dev 源码边界:
 
-- dev 只直接暴露源码树里的 `.ts`、`.js`、`.svelte` 模块, 不直接暴露项目根上的 `svelte-builder.config.json`、`svelte-builder.config.ts`、测试文件或其他脚本
+- dev 只直接暴露源码树里的 `.ts`、`.js`、`.svelte` 模块, 不直接暴露项目根上的 `svelte-builder.config.json`、测试文件或其他脚本
 - 若 `appComponent` 位于 `src/` 下的更深层目录, dev 仍会回收到 `src/` 作为源码服务和 watch 根
 - 若 `appComponent` 位于其他顶级源码目录, dev 会以该顶级目录作为源码服务和 watch 根
 
@@ -101,16 +98,6 @@ demo/
   svelte-builder.config.json
 ```
 
-也兼容:
-
-```text
-demo/
-  src/
-    App.svelte
-  assets/
-  svelte-builder.config.ts
-```
-
 静态资源语义固定为 `/assets/*`:
 
 - dev: 直接从 `<rootDir>/<assetsDir>/*` 读取
@@ -149,9 +136,8 @@ src/lazy/ButtonDemo.svelte   2026-03-18 11:11:11  4.1 KiB  1.9 KiB
 
 安全注意事项:
 
-- 默认优先使用 `svelte-builder.config.json`, 它是纯数据配置, 不执行项目代码
-- `svelte-builder.config.ts` 仍然兼容, 但它是可执行模块, 加载时会执行顶层代码; 仅应在可信项目中使用
-- CLI 在回退加载 `svelte-builder.config.ts` 时会打印安全提示, 提醒优先改用 JSON 配置
+- 配置文件固定为 `svelte-builder.config.json`, 它是纯 JSON 配置, 不执行项目代码
+- 旧的 `svelte-builder.config.ts` 已不再支持; 若项目中仍存在该文件, 请迁移并重命名为 `svelte-builder.config.json`
 - dev server 的设计目标是本地开发, 不应当作为公网服务暴露; 当前 HTTP 500 响应会对客户端隐藏内部错误细节, 但控制台仍会输出完整异常, 方便本地排查
 - dev 只暴露受控源码树、`/_node_modules/*` 和 `/assets/*`, 并对路径穿越与符号链接逃逸做了边界校验, 但这不等于适合承载不可信访问流量
 - 若要部署到生产环境, 建议在反向代理或静态托管层补充安全响应头, 至少包括 `Content-Security-Policy`、`X-Content-Type-Options: nosniff` 和合适的 `Referrer-Policy`
@@ -182,4 +168,4 @@ bun run build
 
 `demo/package.json` 里的脚本当前保留为 `bun ./node_modules/.bin/svelte-builder ...`, 而不是直接写 `svelte-builder ...`。原因是这个仓库当前导出的 bin 仍由 Bun 解释执行 ESM 源文件, 直接把 `.bin/svelte-builder` 当作 shell 命令执行会失败。换句话说, 这里的写法不是为了兼容 PATH, 而是为了显式要求 Bun 来执行这个 bin 入口。
 
-示例配置文件见 `demo/svelte-builder.config.json`。也兼容 `svelte-builder.config.ts`, 但默认更推荐纯数据的 JSON 配置格式。
+示例配置文件见 `demo/svelte-builder.config.json`。
