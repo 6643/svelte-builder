@@ -1,0 +1,6 @@
+{
+    "appComponent": "src/App.svelte",
+    "assetsDir": "assets",
+    "appTitle": "Svelte Builder",
+    "mountId": "app"
+}

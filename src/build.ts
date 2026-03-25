@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
@@ -6,6 +5,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { compile } from "svelte/compiler";
 import { createBootstrapSource, createImportPath } from "./bootstrap";
 import { copyConfiguredAssets, resolveConfiguredAssetsDir } from "./assets";
+import { finalizeJavaScriptAssets, type FinalJavaScriptAsset } from "./finalize-js";
 import { stripSvelteDiagnosticsModule } from "./strip-svelte-diagnostics";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -21,19 +21,6 @@ export type BuildArtifacts = {
     htmlFile: string;
     jsFile: string;
     outDir: string;
-};
-
-type StagedJavaScriptAsset = {
-    kind: "chunk" | "entry-point";
-    oldFile: string;
-    originalContent: string;
-};
-
-type FinalJavaScriptAsset = {
-    content: string;
-    finalFile: string;
-    kind: "chunk" | "entry-point";
-    oldFile: string;
 };
 
 export type BuildSvelteOptions = {
@@ -58,57 +45,7 @@ const MAX_JS_HASH_STABILIZATION_PASSES = 32;
 const STAGE_OUTDIR_NAME = ".bsp-stage";
 const TEMP_OUTDIR_NAME = "bsp-out";
 const RELEASES_DIR_NAME = ".bsp-releases";
-const CONFIG_FILE_NAME = "svelte-builder.config.ts";
-const CONFIG_LOADER_EVAL = [
-    'const { pathToFileURL } = await import("node:url");',
-    "const hasOwnProperty = (value, key) => Object.prototype.hasOwnProperty.call(value, key);",
-    'const NON_SERIALIZABLE_KNOWN_FIELD = { __svelteBuilderInvalidKnownField: true };',
-    "const serializeKnownFieldValue = (value) => {",
-    '    if (value === null || value === undefined || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {',
-    "        return value;",
-    "    }",
-    "    return NON_SERIALIZABLE_KNOWN_FIELD;",
-    "};",
-    "const createSerializedConfigPayload = (loaded) => {",
-    '    if (Array.isArray(loaded)) {',
-    '        return { kind: "invalid-top-level" };',
-    "    }",
-    '    if (typeof loaded !== "object" || loaded === null) {',
-    '        if (typeof loaded === "bigint" || typeof loaded === "function" || typeof loaded === "symbol") {',
-    '            return { kind: "invalid-top-level" };',
-    "        }",
-    '        return { kind: "value", value: loaded };',
-    "    }",
-    "    const selected = {};",
-    '    for (const key of ["appTitle", "appComponent", "assetsDir", "outDir", "mountId", "port", "sourcemap", "stripSvelteDiagnostics"]) {',
-    "        if (hasOwnProperty(loaded, key)) {",
-    "            selected[key] = serializeKnownFieldValue(loaded[key]);",
-    "        }",
-    "    }",
-    '    if (hasOwnProperty(loaded, "htmlTemplate")) {',
-    "        selected.htmlTemplate = true;",
-    "    }",
-    '    return { kind: "value", value: selected };',
-    "};",
-    "const configPath = process.argv[1];",
-    "try {",
-    "    const module = await import(pathToFileURL(configPath).href);",
-    "    const loaded = module.default ?? module.config;",
-    "    if (loaded === undefined) {",
-        '        console.error("Missing default export");',
-        "        process.exit(2);",
-    "    }",
-    "    const serialized = JSON.stringify(createSerializedConfigPayload(loaded));",
-    "    if (serialized === undefined) {",
-    '        console.error("Config is not JSON-serializable");',
-    "        process.exit(3);",
-    "    }",
-    "    process.stdout.write(serialized);",
-    "} catch (error) {",
-    "    console.error(error instanceof Error ? error.message : String(error));",
-    "    process.exit(1);",
-    "}",
-].join("\n");
+const CONFIG_FILE_NAME = "svelte-builder.config.json";
 
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 
@@ -129,8 +66,6 @@ const escapeHtml = (value: string): string =>
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
-
-const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const hasOwnProperty = (value: object, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
 
@@ -263,13 +198,13 @@ const validateOutDir = (
     return ok(outDir);
 };
 
-const parseBuildConfig = (value: unknown): Result<BuildSvelteOptions> => {
+const parseBuildConfig = (value: unknown, configFileName = CONFIG_FILE_NAME): Result<BuildSvelteOptions> => {
     if (!isRecord(value)) {
-        return fail(`Invalid ${CONFIG_FILE_NAME}: expected a default-exported object config.`);
+        return fail(`Invalid ${configFileName}: expected a default-exported object config.`);
     }
 
     if (hasOwnProperty(value, "htmlTemplate")) {
-        return fail(`Invalid htmlTemplate in ${CONFIG_FILE_NAME}: htmlTemplate is no longer supported.`);
+        return fail(`Invalid htmlTemplate in ${configFileName}: htmlTemplate is no longer supported.`);
     }
 
     const appTitle = readOptionalStringField(value, "appTitle");
@@ -351,24 +286,6 @@ const formatBuildLogs = (logs: Array<{ message?: string; name?: string }>): stri
     return logs.map((log) => log.message ?? log.name ?? "Unknown build error").join("\n");
 };
 
-const createReferenceRewritePattern = (nameMap: Map<string, string>): RegExp | null => {
-    const stagedFiles = Array.from(nameMap.keys()).sort((left, right) => right.length - left.length);
-    if (stagedFiles.length === 0) {
-        return null;
-    }
-
-    return new RegExp(stagedFiles.map(escapeRegExp).join("|"), "g");
-};
-
-const rewriteJavaScriptAssetReferences = (content: string, nameMap: Map<string, string>): string => {
-    const pattern = createReferenceRewritePattern(nameMap);
-    if (!pattern) {
-        return content;
-    }
-
-    return content.replace(pattern, (match) => nameMap.get(match) ?? match);
-};
-
 const createMergedCssAsset = (cssByPath: Map<string, string>): { content: string; finalFile: string } => {
     const content = Array.from(cssByPath.values()).join("\n");
 
@@ -376,26 +293,6 @@ const createMergedCssAsset = (cssByPath: Map<string, string>): { content: string
         content,
         finalFile: createFinalAssetFile(content, ".css"),
     };
-};
-
-const validateUniqueAssetNames = (
-    assets: Array<{ content: string; finalFile: string; oldFile: string }>,
-): Result<void> => {
-    const contentsByFinalFile = new Map<string, string>();
-
-    for (const asset of assets) {
-        const existing = contentsByFinalFile.get(asset.finalFile);
-        if (existing === undefined) {
-            contentsByFinalFile.set(asset.finalFile, asset.content);
-            continue;
-        }
-
-        if (existing !== asset.content) {
-            return fail(`Hash collision detected for ${asset.oldFile}: ${asset.finalFile}`);
-        }
-    }
-
-    return ok(undefined);
 };
 
 const prepareDir = async (path: string): Promise<Result<string>> => {
@@ -691,33 +588,23 @@ export const defineSvelteConfig = (config: BuildSvelteOptions): BuildSvelteOptio
 
 const resolveSourcemapMode = (sourcemap: boolean | undefined): Bun.BuildConfig["sourcemap"] => (sourcemap ? "inline" : "none");
 
-const loadFreshConfigModule = (configPath: string): Result<unknown> => {
-    const loaded = spawnSync(process.execPath, ["-e", CONFIG_LOADER_EVAL, configPath], {
-        encoding: "utf8",
-    });
-
-    if (loaded.error) {
-        return fail(`Failed to load ${configPath}: ${getErrorMessage(loaded.error)}`);
+const loadJsonConfigFile = async (configPath: string): Promise<Result<unknown>> => {
+    const configFile = Bun.file(configPath);
+    const exists = await configFile.exists();
+    if (!exists) {
+        return fail(`Missing config: ${configPath}`);
     }
 
-    if (loaded.status !== 0) {
-        const detail = loaded.stderr.trim() || loaded.stdout.trim() || `child exit ${loaded.status}`;
-        return fail(`Failed to load ${configPath}: ${detail}`);
-    }
-
-    try {
-        const payload = JSON.parse(loaded.stdout) as
-            | { kind: "invalid-top-level" }
-            | { kind: "value"; value: unknown };
-
-        if (payload.kind === "invalid-top-level") {
-            return ok([]);
-        }
-
-        return ok(payload.value);
-    } catch (error) {
-        return fail(`Failed to parse ${configPath}: ${getErrorMessage(error)}`);
-    }
+    return configFile.text().then(
+        (contents) => {
+            try {
+                return ok(JSON.parse(contents));
+            } catch (error) {
+                return fail(`Failed to parse ${configPath}: ${getErrorMessage(error)}`);
+            }
+        },
+        (error) => fail(`Failed to read ${configPath}: ${getErrorMessage(error)}`),
+    );
 };
 
 export const loadSvelteConfig = async (cwd = process.cwd()): Promise<Result<BuildSvelteOptions>> => {
@@ -725,15 +612,20 @@ export const loadSvelteConfig = async (cwd = process.cwd()): Promise<Result<Buil
     const configPath = join(configRoot, CONFIG_FILE_NAME);
     const configExists = await Bun.file(configPath).exists();
     if (!configExists) {
+        const legacyConfigPath = join(configRoot, "svelte-builder.config.ts");
+        if (await Bun.file(legacyConfigPath).exists()) {
+            return fail(`Legacy config is no longer supported: ${legacyConfigPath}. Rename it to ${configPath}.`);
+        }
+
         return fail(`Missing config: ${configPath}`);
     }
 
-    const loaded = loadFreshConfigModule(configPath);
+    const loaded = await loadJsonConfigFile(configPath);
     if (!loaded.ok) {
         return loaded;
     }
 
-    const parsed = parseBuildConfig(loaded.value);
+    const parsed = parseBuildConfig(loaded.value, CONFIG_FILE_NAME);
     if (!parsed.ok) {
         return parsed;
     }
@@ -742,72 +634,6 @@ export const loadSvelteConfig = async (cwd = process.cwd()): Promise<Result<Buil
         ...parsed.value,
         rootDir: configRoot,
     });
-};
-
-const readStagedJavaScriptAssets = async (
-    outputs: Bun.BuildArtifact[],
-): Promise<Result<StagedJavaScriptAsset[]>> => {
-    const jsOutputs = outputs.filter(
-        (output): output is Bun.BuildArtifact & { kind: "chunk" | "entry-point" } =>
-            (output.kind === "chunk" || output.kind === "entry-point") && output.path.endsWith(".js"),
-    );
-
-    return Promise.all(
-        jsOutputs.map(async (output) => {
-            const originalContent = await output.text();
-
-            return {
-                kind: output.kind,
-                oldFile: basename(output.path),
-                originalContent,
-            };
-        }),
-    ).then(
-        (assets) => ok(assets),
-        (error) => fail(`Failed to read staged JavaScript assets: ${getErrorMessage(error)}`),
-    );
-};
-
-const createInitialJavaScriptNameMap = (assets: StagedJavaScriptAsset[]): Map<string, string> =>
-    new Map(assets.map((asset) => [asset.oldFile, createFinalAssetFile(asset.originalContent, ".js")]));
-
-const createFinalJavaScriptAssets = (
-    assets: StagedJavaScriptAsset[],
-    nameMap: Map<string, string>,
-): FinalJavaScriptAsset[] =>
-    assets.map((asset) => {
-        const content = rewriteJavaScriptAssetReferences(asset.originalContent, nameMap);
-
-        return {
-            content,
-            finalFile: createFinalAssetFile(content, ".js"),
-            kind: asset.kind,
-            oldFile: asset.oldFile,
-        };
-    });
-
-const areNameMapsEqual = (left: Map<string, string>, right: Map<string, string>): boolean =>
-    left.size === right.size && Array.from(left.entries()).every(([key, value]) => right.get(key) === value);
-
-const stabilizeJavaScriptAssets = (assets: StagedJavaScriptAsset[]): Result<FinalJavaScriptAsset[]> => {
-    let nameMap = createInitialJavaScriptNameMap(assets);
-
-    for (let pass = 0; pass < MAX_JS_HASH_STABILIZATION_PASSES; pass += 1) {
-        const rewrittenAssets = createFinalJavaScriptAssets(assets, nameMap);
-        const uniqueAssets = validateUniqueAssetNames(rewrittenAssets);
-        if (!uniqueAssets.ok) {
-            return uniqueAssets;
-        }
-
-        const nextNameMap = new Map(rewrittenAssets.map((asset) => [asset.oldFile, asset.finalFile]));
-        if (areNameMapsEqual(nameMap, nextNameMap)) {
-            return ok(rewrittenAssets);
-        }
-
-        nameMap = nextNameMap;
-    }
-
-    return fail(`Failed to stabilize JavaScript asset names after ${MAX_JS_HASH_STABILIZATION_PASSES} passes.`);
 };
 
 const writeJavaScriptAssets = async (outDir: string, assets: FinalJavaScriptAsset[]): Promise<Result<void>> => {
@@ -946,12 +772,11 @@ export const buildSvelte = async (options: BuildSvelteOptions = {}): Promise<Res
             return fail(formatBuildLogs(bundle.logs));
         }
 
-        const stagedAssets = await readStagedJavaScriptAssets(bundle.outputs);
-        if (!stagedAssets.ok) {
-            return stagedAssets;
-        }
-
-        const rewrittenAssets = stabilizeJavaScriptAssets(stagedAssets.value);
+        const rewrittenAssets = await finalizeJavaScriptAssets(
+            bundle.outputs,
+            createFinalAssetFile,
+            MAX_JS_HASH_STABILIZATION_PASSES,
+        );
         if (!rewrittenAssets.ok) {
             return rewrittenAssets;
         }

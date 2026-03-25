@@ -151,22 +151,15 @@ const writeConfiguredBuildFixture = (
         ].join("\n"),
     );
 
-    writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            `    assetsDir: ${options.assetsDirLine},`,
-            options.sourcemapLine === undefined ? null : `    sourcemap: ${options.sourcemapLine},`,
-            options.stripSvelteDiagnosticsLine === undefined
-                ? null
-                : `    stripSvelteDiagnostics: ${options.stripSvelteDiagnosticsLine},`,
-            "});",
-        ]
-            .filter((line): line is string => line !== null)
-            .join("\n"),
-    );
+    const config = {
+        assetsDir: JSON.parse(options.assetsDirLine),
+        ...(options.sourcemapLine === undefined ? {} : { sourcemap: JSON.parse(options.sourcemapLine) }),
+        ...(options.stripSvelteDiagnosticsLine === undefined
+            ? {}
+            : { stripSvelteDiagnostics: JSON.parse(options.stripSvelteDiagnosticsLine) }),
+    };
+
+    writeFileSync(join(rootDir, "svelte-builder.config.json"), JSON.stringify(config, null, 4));
 };
 
 const writeRuntimeAwareFixture = (
@@ -182,20 +175,13 @@ const writeRuntimeAwareFixture = (
     );
 
     if (options.mountIdLine !== undefined || options.appTitleLine !== undefined || options.outDirLine !== undefined) {
-        writeFileSync(
-            join(rootDir, "svelte-builder.config.ts"),
-            [
-                'import { defineSvelteConfig } from "svelte-builder";',
-                "",
-                "export default defineSvelteConfig({",
-                options.mountIdLine === undefined ? null : `    mountId: ${options.mountIdLine},`,
-                options.appTitleLine === undefined ? null : `    appTitle: ${options.appTitleLine},`,
-                options.outDirLine === undefined ? null : `    outDir: ${options.outDirLine},`,
-                "});",
-            ]
-                .filter((line): line is string => line !== null)
-                .join("\n"),
-        );
+        const config = {
+            ...(options.mountIdLine === undefined ? {} : { mountId: JSON.parse(options.mountIdLine) }),
+            ...(options.appTitleLine === undefined ? {} : { appTitle: JSON.parse(options.appTitleLine) }),
+            ...(options.outDirLine === undefined ? {} : { outDir: JSON.parse(options.outDirLine) }),
+        };
+
+        writeFileSync(join(rootDir, "svelte-builder.config.json"), JSON.stringify(config, null, 4));
     }
 };
 
@@ -220,19 +206,12 @@ const writeConfiguredDevFixture = (
         ["<h1>dev</h1>", "", "<style>", "  h1 { color: coral; }", "</style>"].join("\n"),
     );
 
-    writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            options.assetsDirLine === undefined ? null : `    assetsDir: ${options.assetsDirLine},`,
-            options.portLine ?? "    port: 61113,",
-            "});",
-        ]
-            .filter((line): line is string => line !== null)
-            .join("\n"),
-    );
+    const config = {
+        ...(options.assetsDirLine === undefined ? {} : { assetsDir: JSON.parse(options.assetsDirLine) }),
+        port: JSON.parse((options.portLine ?? "    port: 61113,").replace(/^\s*port:\s*/, "").replace(/,$/, "")),
+    };
+
+    writeFileSync(join(rootDir, "svelte-builder.config.json"), JSON.stringify(config, null, 4));
 };
 
 const expectFileBytesEqual = (path: string, expected: Uint8Array): void => {
@@ -414,15 +393,22 @@ test("example workspace package contains the canonical demo source tree", async 
     expect(await Bun.file(join(EXAMPLE_ASSETS, "panel-mark.svg")).exists()).toBe(true);
     expect(await Bun.file(join(EXAMPLE_ROOT, "build.ts")).exists()).toBe(false);
     expect(await Bun.file(join(EXAMPLE_ROOT, "server.ts")).exists()).toBe(false);
+    expect(await Bun.file(join(EXAMPLE_ROOT, "svelte-builder.config.ts")).exists()).toBe(false);
 
-    const configSource = readFileSync(join(EXAMPLE_ROOT, "svelte-builder.config.ts"), "utf8");
+    const configSource = readFileSync(join(EXAMPLE_ROOT, "svelte-builder.config.json"), "utf8");
     const appSource = readFileSync(join(EXAMPLE_SRC, "App.svelte"), "utf8");
+    const config = JSON.parse(configSource) as {
+        appComponent?: string;
+        assetsDir?: string;
+        appTitle?: string;
+        mountId?: string;
+    };
 
-    expect(configSource).toContain('assetsDir: "assets"');
-    expect(configSource).toContain('appComponent: "src/App.svelte"');
-    expect(configSource).toContain('appTitle: "Svelte Builder"');
-    expect(configSource).toContain('mountId: "app"');
-    expect(configSource).toContain('import { defineSvelteConfig } from "svelte-builder"');
+    expect(config.assetsDir).toBe("assets");
+    expect(config.appComponent).toBe("src/App.svelte");
+    expect(config.appTitle).toBe("Svelte Builder");
+    expect(config.mountId).toBe("app");
+    expect(configSource).not.toContain("defineSvelteConfig");
     expect(appSource).toContain('src="/assets/panel-mark.svg"');
 });
 
@@ -965,13 +951,8 @@ test("runConfiguredBuild produces the same entry assets across invocation cwd", 
     );
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({}, null, 4),
     );
 
     const { runConfiguredBuild } = await import("../src/index.ts");
@@ -1012,7 +993,7 @@ test("runConfiguredBuild produces the same entry assets across invocation cwd", 
     expect(secondHtml).toBe(firstHtml);
 });
 
-test("runConfiguredBuild loads svelte-builder.config.ts and custom outDir", async () => {
+test("runConfiguredBuild loads svelte-builder.config.json and custom outDir", async () => {
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-"));
     createdDirs.push(rootDir);
 
@@ -1061,7 +1042,7 @@ test("buildSvelte rejects outDir that resolves to the project root", async () =>
     expect(result.error).toMatch(/inside the project root|dedicated build output directory/i);
 });
 
-test("runConfiguredBuild ignores rootDir in svelte-builder.config.ts", async () => {
+test("runConfiguredBuild ignores rootDir in svelte-builder.config.json", async () => {
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-root-"));
     const ignoredRootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-ignored-root-"));
     createdDirs.push(rootDir, ignoredRootDir);
@@ -1084,15 +1065,8 @@ test("runConfiguredBuild ignores rootDir in svelte-builder.config.ts", async () 
     );
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            '    outDir: "public",',
-            `    rootDir: ${JSON.stringify(ignoredRootDir)},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ outDir: "public", rootDir: ignoredRootDir }, null, 4),
     );
 
     const { runConfiguredBuild } = await import("../src/index.ts");
@@ -1151,15 +1125,8 @@ test("runConfiguredBuild rejects htmlTemplate in config", async () => {
     );
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            '    htmlTemplate: "static/index.html",',
-            '    outDir: "public",',
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ htmlTemplate: "static/index.html", outDir: "public" }, null, 4),
     );
 
     const { runConfiguredBuild } = await import("../src/index.ts");
@@ -1633,19 +1600,122 @@ test("buildProduction stale lock recovery preserves unrelated legacy release dir
     expect(readFileSync(join(rootDir, ".bsp-releases", "foreign-release", "sentinel.txt"), "utf8")).toBe("keep-release");
 });
 
-test("loadSvelteConfig reloads updated config from the same cwd", async () => {
+test("loadSvelteConfig loads JSON config", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-json-load-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>config json load</h1>");
+    writeFileSync(join(rootDir, "svelte-builder.config.json"), JSON.stringify({ appTitle: "from-json" }));
+
+    const { loadSvelteConfig } = await import("../src/build.ts");
+    const result = await loadSvelteConfig(rootDir);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    expect(result.value.appTitle).toBe("from-json");
+});
+
+test("loadSvelteConfig loads pure JSON config", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-json-safe-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>config json safe</h1>");
+    writeFileSync(join(rootDir, "svelte-builder.config.json"), JSON.stringify({ appTitle: "from-json" }));
+
+    const { loadSvelteConfig } = await import("../src/build.ts");
+    const result = await loadSvelteConfig(rootDir);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    expect(result.value.appTitle).toBe("from-json");
+    expect(existsSync(join(rootDir, "ts-config-side-effect.txt"))).toBe(false);
+});
+
+test("loadSvelteConfig rejects legacy svelte-builder.config.ts when JSON config is absent", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-json-fallback-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>config json fallback</h1>");
+    writeFileSync(join(rootDir, "svelte-builder.config.ts"), 'export default { appTitle: "from-ts" };');
+
+    const { loadSvelteConfig } = await import("../src/build.ts");
+    const result = await loadSvelteConfig(rootDir);
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        throw new Error("Expected loadSvelteConfig to reject legacy TypeScript config files");
+    }
+
+    expect(result.error).toContain("svelte-builder.config.ts");
+    expect(result.error).toMatch(/no longer supported/i);
+    expect(result.error).toContain("svelte-builder.config.json");
+});
+
+test("loadSvelteConfig rejects invalid JSON config with the JSON file name in the error", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-json-invalid-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>config json invalid</h1>");
+    writeFileSync(join(rootDir, "svelte-builder.config.json"), '{ invalid json');
+
+    const { loadSvelteConfig } = await import("../src/build.ts");
+    const result = await loadSvelteConfig(rootDir);
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        throw new Error("Expected loadSvelteConfig to reject invalid JSON config");
+    }
+
+    expect(result.error).toContain("svelte-builder.config.json");
+});
+
+test("loadSvelteConfig reports the JSON config file when none exists", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-missing-both-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>config missing both</h1>");
+
+    const { loadSvelteConfig } = await import("../src/build.ts");
+    const result = await loadSvelteConfig(rootDir);
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        throw new Error("Expected loadSvelteConfig to fail when no supported config file exists");
+    }
+
+    expect(result.error).toContain("svelte-builder.config.json");
+    expect(result.error).not.toContain("svelte-builder.config.ts");
+});
+
+test("loadSvelteConfig reloads updated JSON config from the same cwd", async () => {
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-reload-"));
     createdDirs.push(rootDir);
 
     mkdirSync(join(rootDir, "src"), { recursive: true });
     writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>config reload</h1>");
 
-    writeFileSync(join(rootDir, "svelte-builder.config.ts"), 'export default { appTitle: "first" };');
+    writeFileSync(join(rootDir, "svelte-builder.config.json"), JSON.stringify({ appTitle: "first" }));
 
     const { loadSvelteConfig } = await import("../src/build.ts");
     const first = await loadSvelteConfig(rootDir);
 
-    writeFileSync(join(rootDir, "svelte-builder.config.ts"), 'export default { appTitle: "second" };');
+    writeFileSync(join(rootDir, "svelte-builder.config.json"), JSON.stringify({ appTitle: "second" }));
 
     const second = await loadSvelteConfig(rootDir);
 
@@ -1664,13 +1734,13 @@ test("loadSvelteConfig reloads updated config from the same cwd", async () => {
     expect(second.value.appTitle).toBe("second");
 });
 
-test("loadSvelteConfig ignores non-serializable unknown fields", async () => {
+test("loadSvelteConfig ignores unknown JSON fields", async () => {
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-unknown-field-"));
     createdDirs.push(rootDir);
 
     mkdirSync(join(rootDir, "src"), { recursive: true });
     writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>config unknown field</h1>");
-    writeFileSync(join(rootDir, "svelte-builder.config.ts"), 'export default { appTitle: "ok", futureFlag: 1n };');
+    writeFileSync(join(rootDir, "svelte-builder.config.json"), JSON.stringify({ appTitle: "ok", futureFlag: { nested: true } }));
 
     const { loadSvelteConfig } = await import("../src/build.ts");
     const result = await loadSvelteConfig(rootDir);
@@ -1684,13 +1754,13 @@ test("loadSvelteConfig ignores non-serializable unknown fields", async () => {
     expect(result.value.appTitle).toBe("ok");
 });
 
-test("loadSvelteConfig rejects non-serializable known fields instead of falling back to defaults", async () => {
+test("loadSvelteConfig rejects invalid known JSON fields instead of falling back to defaults", async () => {
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-known-field-"));
     createdDirs.push(rootDir);
 
     mkdirSync(join(rootDir, "src"), { recursive: true });
     writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>config known field</h1>");
-    writeFileSync(join(rootDir, "svelte-builder.config.ts"), 'export default { mountId: () => "bad" };');
+    writeFileSync(join(rootDir, "svelte-builder.config.json"), JSON.stringify({ mountId: { bad: true } }));
 
     const { loadSvelteConfig } = await import("../src/build.ts");
     const result = await loadSvelteConfig(rootDir);
@@ -1698,20 +1768,20 @@ test("loadSvelteConfig rejects non-serializable known fields instead of falling 
     expect(result.ok).toBe(false);
 
     if (result.ok) {
-        throw new Error("Expected loadSvelteConfig to reject a non-serializable known field");
+        throw new Error("Expected loadSvelteConfig to reject an invalid known JSON field");
     }
 
     expect(result.error).toContain("Invalid mountId");
     expect(result.error).toContain("expected string");
 });
 
-test("loadSvelteConfig rejects top-level array configs even when they contain non-serializable values", async () => {
+test("loadSvelteConfig rejects top-level array JSON configs", async () => {
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-array-bigint-"));
     createdDirs.push(rootDir);
 
     mkdirSync(join(rootDir, "src"), { recursive: true });
     writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>config array bigint</h1>");
-    writeFileSync(join(rootDir, "svelte-builder.config.ts"), "export default [1n];");
+    writeFileSync(join(rootDir, "svelte-builder.config.json"), JSON.stringify([1]));
 
     const { loadSvelteConfig } = await import("../src/build.ts");
     const result = await loadSvelteConfig(rootDir);
@@ -1722,7 +1792,7 @@ test("loadSvelteConfig rejects top-level array configs even when they contain no
         throw new Error("Expected loadSvelteConfig to reject a top-level array config");
     }
 
-    expect(result.error).toContain("Invalid svelte-builder.config.ts: expected a default-exported object config.");
+    expect(result.error).toContain("Invalid svelte-builder.config.json: expected a default-exported object config.");
 });
 
 test("runConfiguredDevServer rejects htmlTemplate in config", async () =>
@@ -1749,15 +1819,8 @@ test("runConfiguredDevServer rejects htmlTemplate in config", async () =>
     );
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            '    htmlTemplate: "static/index.html",',
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ htmlTemplate: "static/index.html", port: devPort }, null, 4),
     );
 
     const { runConfiguredDevServer } = await import("../src/index.ts");
@@ -1813,14 +1876,8 @@ test("runConfiguredDevServer ignores src/index.html and injects the import map",
     );
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
     );
 
     const { runConfiguredDevServer } = await import("../src/index.ts");
@@ -1870,14 +1927,8 @@ test("runConfiguredDevServer serves the built-in html shell and injects the impo
     );
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
     );
 
     const { runConfiguredDevServer } = await import("../src/index.ts");
@@ -1911,14 +1962,8 @@ test("runConfiguredDevServer injects a live reload client into the dev html shel
 
     writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>dev live reload</h1>");
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
     );
 
     const { runConfiguredDevServer } = await import("../src/index.ts");
@@ -1953,14 +1998,8 @@ test("runConfiguredDevServer serves the app shell for direct SPA route requests"
     );
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
     );
 
     const { runConfiguredDevServer } = await import("../src/index.ts");
@@ -2005,15 +2044,8 @@ test("runConfiguredDevServer escapes appTitle in the dev html shell", async () =
     );
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            '    appTitle: "<script>alert(1)</script> & demo",',
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ appTitle: "<script>alert(1)</script> & demo", port: devPort }, null, 4),
     );
 
     const { runConfiguredDevServer } = await import("../src/index.ts");
@@ -2048,16 +2080,8 @@ test("runConfiguredDevServer serves a generated bootstrap module without main.ts
     writeFileSync(join(rootDir, "src", "Alt.svelte"), "<h1>alt</h1>");
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            '    appComponent: "src/Alt.svelte",',
-            '    mountId: "root",',
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ appComponent: "src/Alt.svelte", mountId: "root", port: devPort }, null, 4),
     );
 
     expect(existsSync(join(rootDir, "main.ts"))).toBe(false);
@@ -2108,14 +2132,8 @@ test("runConfiguredDevServer rewrites bare package imports and compiles symlinke
     );
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
     );
 
     writeFileSync(
@@ -2212,14 +2230,8 @@ test("runConfiguredDevServer serves Svelte modules whose CSS contains template l
     );
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
     );
 
     const { runConfiguredDevServer } = await import("../src/index.ts");
@@ -2314,14 +2326,8 @@ test("runConfiguredDevServer logs a recompiled asset report for changed componen
     );
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
     );
 
     const { runConfiguredDevServer } = await import("../src/index.ts");
@@ -2457,14 +2463,8 @@ test("runConfiguredDevServer logs only the changed component and excludes untouc
     writeFileSync(join(rootDir, "src", "lazy", "CardDemo.svelte"), "<section>two</section>");
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
     );
 
     const { runConfiguredDevServer } = await import("../src/index.ts");
@@ -2541,14 +2541,8 @@ test("runConfiguredDevServer logs a recompiled asset report for changed JavaScri
     );
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
     );
 
     const { runConfiguredDevServer } = await import("../src/index.ts");
@@ -2630,14 +2624,8 @@ test("runConfiguredDevServer watches directories whose names only contain exclud
     writeFileSync(join(rootDir, "src", "distilled", "helper.js"), 'export const label = "before";');
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
     );
 
     const { runConfiguredDevServer } = await import("../src/index.ts");
@@ -2707,14 +2695,8 @@ test("runConfiguredDevServer watches directories created after startup", async (
     writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>new directories</h1>");
 
     writeFileSync(
-        join(rootDir, "svelte-builder.config.ts"),
-        [
-            'import { defineSvelteConfig } from "svelte-builder";',
-            "",
-            "export default defineSvelteConfig({",
-            `    port: ${devPort},`,
-            "});",
-        ].join("\n"),
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
     );
 
     const { runConfiguredDevServer } = await import("../src/index.ts");
@@ -2864,6 +2846,73 @@ test("runConfiguredDevServer rejects escaped node_modules paths and still serves
 
         expect(validResponse.status).toBe(200);
         expect(validPackageJson.name).toBe("svelte");
+    } finally {
+        await result.value.stop();
+    }
+    }));
+
+test("runConfiguredDevServer binds to localhost only", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-localhost-only-"));
+    createdDirs.push(rootDir);
+
+    writeConfiguredDevFixture(rootDir, { portLine: `    port: ${devPort},` });
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    try {
+        const localResponse = await fetch(`http://127.0.0.1:${result.value.port}/`);
+        expect(localResponse.status).toBe(200);
+    } finally {
+        await result.value.stop();
+    }
+    }));
+
+test("runConfiguredDevServer hides internal error details in HTTP 500 responses", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-500-redaction-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(
+        join(rootDir, "src", "App.svelte"),
+        [
+            "<script>",
+            '  import broken from "bad-package";',
+            "</script>",
+            "",
+            "<h1>{broken}</h1>",
+        ].join("\n"),
+    );
+
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    try {
+        const response = await requestDevServerPath(result.value.port, "/src/App.svelte");
+
+        expect(response.status).toBe(500);
+        expect(response.body).toBe("Internal Server Error");
+        expect(response.body).not.toContain("bad-package");
+        expect(response.body).not.toContain(rootDir);
     } finally {
         await result.value.stop();
     }

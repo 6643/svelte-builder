@@ -1077,7 +1077,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
         },
         (error: Bun.ErrorLike) => {
             console.error(error);
-            return new Response(`Internal Server Error: ${error.message}`, { status: 500 });
+            return new Response("Internal Server Error", { status: 500 });
         },
     );
 
