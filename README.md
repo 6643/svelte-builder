@@ -53,38 +53,32 @@ dev 源码边界:
 
 `appComponent` 是可选配置:
 
-```ts
-import { defineSvelteConfig } from "svelte-builder";
-
-export default defineSvelteConfig({
-    appComponent: "src/App.svelte",
-    appTitle: "Svelte Builder",
-});
+```json
+{
+    "appComponent": "src/App.svelte",
+    "appTitle": "Svelte Builder"
+}
 ```
 
 `appComponent` 不配置时默认就是 `src/App.svelte`。
 
 `assetsDir` 是可选配置:
 
-```ts
-import { defineSvelteConfig } from "svelte-builder";
-
-export default defineSvelteConfig({
-    assetsDir: "assets",
-    appTitle: "Svelte Builder",
-});
+```json
+{
+    "assetsDir": "assets",
+    "appTitle": "Svelte Builder"
+}
 ```
 
 `assetsDir` 不配置时默认就是 `assets`。
 
 `stripSvelteDiagnostics` 是可选配置:
 
-```ts
-import { defineSvelteConfig } from "svelte-builder";
-
-export default defineSvelteConfig({
-    stripSvelteDiagnostics: true,
-});
+```json
+{
+    "stripSvelteDiagnostics": true
+}
 ```
 
 `stripSvelteDiagnostics` 的行为边界:

@@ -676,6 +676,9 @@ test("repository root package includes release metadata, license, and package-fo
     expect(rootReadme).not.toContain("bun ./node_modules/svelte-builder/src/cli.ts");
     expect(rootReadme).toContain("svelte-builder dev");
     expect(rootReadme).toContain("svelte-builder build");
+    expect(rootReadme).not.toContain("defineSvelteConfig(");
+    expect(rootReadme).not.toContain("export default defineSvelteConfig");
+    expect(rootReadme).toContain('"appComponent": "src/App.svelte"');
 });
 
 test("tsconfig excludes generated dist directories from typechecking", () => {
@@ -2844,6 +2847,90 @@ test("runConfiguredDevServer watches directories created after startup", async (
         console.log = originalLog;
         await result.value.stop();
     }
+    }));
+
+test("runConfiguredDevServer does not watch symlinked source directories outside the project root", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-symlink-watch-boundary-"));
+    const outsideDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-symlink-watch-outside-"));
+    createdDirs.push(rootDir, outsideDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    mkdirSync(join(outsideDir, "pkg"), { recursive: true });
+
+    writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>symlink watch boundary</h1>");
+    writeFileSync(join(outsideDir, "pkg", "helper.js"), 'export const label = "outside-one";');
+    symlinkSync(join(outsideDir, "pkg"), join(rootDir, "src", "linked"), "dir");
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    const originalLog = console.log;
+    const logs: string[] = [];
+    console.log = (...args: unknown[]) => {
+        logs.push(args.map((value) => String(value)).join(" "));
+    };
+
+    try {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        writeFileSync(join(outsideDir, "pkg", "helper.js"), 'export const label = "outside-two";');
+        await new Promise((resolve) => setTimeout(resolve, 400));
+
+        const log = logs.join("\n");
+        expect(log).not.toContain("src/linked/helper.js");
+    } finally {
+        console.log = originalLog;
+        await result.value.stop();
+    }
+    }));
+
+test("runConfiguredDevServer ignores recursive symlink loops during watch setup", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-watch-symlink-loop-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>watch loop</h1>");
+    symlinkSync(join(rootDir, "src"), join(rootDir, "src", "loop"), "dir");
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
+    );
+
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+        warnings.push(args.map((value) => String(value)).join(" "));
+    };
+
+    try {
+        const { runConfiguredDevServer } = await import("../src/index.ts");
+        const result = await runConfiguredDevServer(rootDir);
+
+        if (!result.ok) {
+            throw new Error(result.error);
+        }
+
+        await result.value.stop();
+    } finally {
+        console.warn = originalWarn;
+    }
+
+    expect(warnings.join("\n")).not.toContain("ELOOP");
+    expect(warnings.join("\n")).not.toContain("watch setup for");
     }));
 
 test("runConfiguredDevServer rejects escaped project source paths and still serves valid source files", async () =>
