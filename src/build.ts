@@ -46,6 +46,17 @@ const STAGE_OUTDIR_NAME = ".bsp-stage";
 const TEMP_OUTDIR_NAME = "bsp-out";
 const RELEASES_DIR_NAME = ".bsp-releases";
 const CONFIG_FILE_NAME = "svelte-builder.config.json";
+const SUPPORTED_CONFIG_FIELDS = [
+    "appComponent",
+    "appTitle",
+    "assetsDir",
+    "mountId",
+    "outDir",
+    "port",
+    "rootDir",
+    "sourcemap",
+    "stripSvelteDiagnostics",
+] as const;
 
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 
@@ -205,6 +216,11 @@ const parseBuildConfig = (value: unknown, configFileName = CONFIG_FILE_NAME): Re
 
     if (hasOwnProperty(value, "htmlTemplate")) {
         return fail(`Invalid htmlTemplate in ${configFileName}: htmlTemplate is no longer supported.`);
+    }
+
+    const unknownField = Object.keys(value).find((field) => !SUPPORTED_CONFIG_FIELDS.includes(field as (typeof SUPPORTED_CONFIG_FIELDS)[number]));
+    if (unknownField !== undefined) {
+        return fail(`Unknown field in ${configFileName}: ${unknownField}.`);
     }
 
     const appTitle = readOptionalStringField(value, "appTitle");

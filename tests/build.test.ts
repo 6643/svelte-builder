@@ -478,6 +478,20 @@ test("dev compile cache reuses unchanged output and invalidates updated modules"
     expect(cache.read("src/App.svelte", 1000)).toBeUndefined();
 });
 
+test("dev compile cache keys keep package sources isolated by physical root", async () => {
+    const { createDevCompileCache, createDevCompileCacheKey } = await import("../src/dev.ts");
+
+    const cache = createDevCompileCache();
+    const packageAKey = createDevCompileCacheKey("/repo/node_modules/pkg-a", "src/index.ts");
+    const packageBKey = createDevCompileCacheKey("/repo/node_modules/pkg-b", "src/index.ts");
+
+    cache.write(packageAKey, 1000, "compiled-a");
+    cache.write(packageBKey, 1000, "compiled-b");
+
+    expect(cache.read(packageAKey, 1000)).toBe("compiled-a");
+    expect(cache.read(packageBKey, 1000)).toBe("compiled-b");
+});
+
 test("dev watch roots stay focused on source, assets, and root-level entry files", async () => {
     const { resolveDevWatchRoots } = await import("../src/dev.ts");
 
@@ -1734,7 +1748,7 @@ test("loadSvelteConfig reloads updated JSON config from the same cwd", async () 
     expect(second.value.appTitle).toBe("second");
 });
 
-test("loadSvelteConfig ignores unknown JSON fields", async () => {
+test("loadSvelteConfig rejects unknown JSON fields", async () => {
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-unknown-field-"));
     createdDirs.push(rootDir);
 
@@ -1745,13 +1759,14 @@ test("loadSvelteConfig ignores unknown JSON fields", async () => {
     const { loadSvelteConfig } = await import("../src/build.ts");
     const result = await loadSvelteConfig(rootDir);
 
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
 
-    if (!result.ok) {
-        throw new Error(result.error);
+    if (result.ok) {
+        throw new Error("Expected loadSvelteConfig to reject an unknown JSON field");
     }
 
-    expect(result.value.appTitle).toBe("ok");
+    expect(result.error).toContain("Unknown field");
+    expect(result.error).toContain("futureFlag");
 });
 
 test("loadSvelteConfig rejects invalid known JSON fields instead of falling back to defaults", async () => {
@@ -2179,6 +2194,88 @@ test("runConfiguredDevServer rewrites bare package imports and compiles symlinke
 
         expect(widgetResponse.status).toBe(200);
         expect(widgetResponse.body).toContain("demo pkg");
+        expect(widgetResponse.body).toContain("$.template(");
+    } finally {
+        await result.value.stop();
+    }
+    }));
+
+test("runConfiguredDevServer resolves package roots without requiring package.json to be exported", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-package-no-package-json-export-"));
+    const packageRoot = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-package-no-package-json-export-pkg-"));
+    createdDirs.push(rootDir, packageRoot);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    mkdirSync(join(rootDir, "node_modules"), { recursive: true });
+    mkdirSync(join(packageRoot, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "node_modules", ".bun"), { recursive: true });
+
+    symlinkSync(join(process.cwd(), "node_modules", "svelte"), join(rootDir, "node_modules", "svelte"));
+    symlinkSync(packageRoot, join(rootDir, "node_modules", "strict-pkg"));
+
+    writeFileSync(
+        join(rootDir, "src", "App.svelte"),
+        [
+            "<script>",
+            '  import { Widget } from "strict-pkg";',
+            "</script>",
+            "",
+            "<Widget />",
+        ].join("\n"),
+    );
+
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
+    );
+
+    writeFileSync(
+        join(packageRoot, "package.json"),
+        [
+            "{",
+            '  "name": "strict-pkg",',
+            '  "type": "module",',
+            '  "exports": {',
+            '    ".": "./src/index.ts",',
+            '    "./package.json": null',
+            "  }",
+            "}",
+        ].join("\n"),
+    );
+
+    writeFileSync(
+        join(packageRoot, "src", "index.ts"),
+        ['export { default as Widget } from "./Widget.svelte";'].join("\n"),
+    );
+
+    writeFileSync(
+        join(packageRoot, "src", "Widget.svelte"),
+        ["<h1>strict pkg</h1>"].join("\n"),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    try {
+        const appResponse = await requestDevServerPath(result.value.port, "/src/App.svelte");
+        const entryResponse = await requestDevServerPath(result.value.port, "/_node_modules/strict-pkg/src/index.ts");
+        const widgetResponse = await requestDevServerPath(result.value.port, "/_node_modules/strict-pkg/src/Widget.svelte");
+
+        expect(appResponse.status).toBe(200);
+        expect(appResponse.body).toContain('from "/_node_modules/strict-pkg/src/index.ts"');
+
+        expect(entryResponse.status).toBe(200);
+        expect(entryResponse.body).toContain('export { default as Widget } from "./Widget.svelte";');
+
+        expect(widgetResponse.status).toBe(200);
+        expect(widgetResponse.body).toContain("strict pkg");
         expect(widgetResponse.body).toContain("$.template(");
     } finally {
         await result.value.stop();
@@ -2879,6 +2976,7 @@ test("runConfiguredDevServer hides internal error details in HTTP 500 responses"
     const devPort = await allocateFreePort();
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-500-redaction-"));
     createdDirs.push(rootDir);
+    const loggedErrors: string[] = [];
 
     mkdirSync(join(rootDir, "src"), { recursive: true });
     mkdirSync(join(rootDir, "assets"), { recursive: true });
@@ -2899,22 +2997,124 @@ test("runConfiguredDevServer hides internal error details in HTTP 500 responses"
         JSON.stringify({ port: devPort }, null, 4),
     );
 
-    const { runConfiguredDevServer } = await import("../src/index.ts");
-    const result = await runConfiguredDevServer(rootDir);
-
-    if (!result.ok) {
-        throw new Error(result.error);
-    }
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+        loggedErrors.push(args.map((value) => String(value)).join(" "));
+    };
 
     try {
-        const response = await requestDevServerPath(result.value.port, "/src/App.svelte");
+        const { runConfiguredDevServer } = await import("../src/index.ts");
+        const result = await runConfiguredDevServer(rootDir);
 
-        expect(response.status).toBe(500);
-        expect(response.body).toBe("Internal Server Error");
-        expect(response.body).not.toContain("bad-package");
-        expect(response.body).not.toContain(rootDir);
+        if (!result.ok) {
+            throw new Error(result.error);
+        }
+
+        try {
+            const response = await requestDevServerPath(result.value.port, "/src/App.svelte");
+
+            expect(response.status).toBe(500);
+            expect(response.body).toBe("Internal Server Error");
+            expect(response.body).not.toContain("bad-package");
+            expect(response.body).not.toContain(rootDir);
+            expect(loggedErrors.some((entry) => entry.includes("bad-package"))).toBe(true);
+        } finally {
+            await result.value.stop();
+        }
     } finally {
-        await result.value.stop();
+        console.error = originalError;
+    }
+    }));
+
+test("runConfiguredDevServer hides JavaScript module resolution errors from HTTP clients", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-js-500-redaction-"));
+    createdDirs.push(rootDir);
+    const loggedErrors: string[] = [];
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>js error</h1>");
+    writeFileSync(join(rootDir, "src", "broken.js"), 'import broken from "bad-package";\nexport default broken;');
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
+    );
+
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+        loggedErrors.push(args.map((value) => String(value)).join(" "));
+    };
+
+    try {
+        const { runConfiguredDevServer } = await import("../src/index.ts");
+        const result = await runConfiguredDevServer(rootDir);
+
+        if (!result.ok) {
+            throw new Error(result.error);
+        }
+
+        try {
+            const response = await requestDevServerPath(result.value.port, "/src/broken.js");
+
+            expect(response.status).toBe(500);
+            expect(response.body).toBe("Internal Server Error");
+            expect(response.body).not.toContain("bad-package");
+            expect(response.body).not.toContain(rootDir);
+            expect(loggedErrors.some((entry) => entry.includes("bad-package"))).toBe(true);
+        } finally {
+            await result.value.stop();
+        }
+    } finally {
+        console.error = originalError;
+    }
+    }));
+
+test("runConfiguredDevServer hides TypeScript transpile errors from HTTP clients", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-ts-500-redaction-"));
+    createdDirs.push(rootDir);
+    const loggedErrors: string[] = [];
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>ts error</h1>");
+    writeFileSync(join(rootDir, "src", "broken.ts"), "export const broken = ;");
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
+    );
+
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+        loggedErrors.push(args.map((value) => String(value)).join(" "));
+    };
+
+    try {
+        const { runConfiguredDevServer } = await import("../src/index.ts");
+        const result = await runConfiguredDevServer(rootDir);
+
+        if (!result.ok) {
+            throw new Error(result.error);
+        }
+
+        try {
+            const response = await requestDevServerPath(result.value.port, "/src/broken.ts");
+
+            expect(response.status).toBe(500);
+            expect(response.body).toBe("Internal Server Error");
+            expect(response.body).not.toContain("Unexpected ;");
+            expect(response.body).not.toContain(rootDir);
+            expect(loggedErrors.some((entry) => entry.includes("Unexpected ;"))).toBe(true);
+        } finally {
+            await result.value.stop();
+        }
+    } finally {
+        console.error = originalError;
     }
     }));
 

@@ -292,31 +292,34 @@ type DevCompileCacheEntry = {
 };
 
 export type DevCompileCache = {
-    invalidate: (modulePath: string) => void;
-    read: (modulePath: string, mtimeMs: number) => string | undefined;
-    write: (modulePath: string, mtimeMs: number, contents: string) => void;
+    invalidate: (cacheKey: string) => void;
+    read: (cacheKey: string, mtimeMs: number) => string | undefined;
+    write: (cacheKey: string, mtimeMs: number, contents: string) => void;
 };
 
 export const createDevCompileCache = (): DevCompileCache => {
     const entries = new Map<string, DevCompileCacheEntry>();
 
     return {
-        invalidate: (modulePath) => {
-            entries.delete(modulePath);
+        invalidate: (cacheKey) => {
+            entries.delete(cacheKey);
         },
-        read: (modulePath, mtimeMs) => {
-            const entry = entries.get(modulePath);
+        read: (cacheKey, mtimeMs) => {
+            const entry = entries.get(cacheKey);
             if (entry === undefined || entry.mtimeMs !== mtimeMs) {
                 return undefined;
             }
 
             return entry.contents;
         },
-        write: (modulePath, mtimeMs, contents) => {
-            entries.set(modulePath, { contents, mtimeMs });
+        write: (cacheKey, mtimeMs, contents) => {
+            entries.set(cacheKey, { contents, mtimeMs });
         },
     };
 };
+
+export const createDevCompileCacheKey = (rootDir: string, modulePath: string): string =>
+    normalizeModulePath(join(rootDir, modulePath));
 
 const getDevModuleMtime = (rootDir: string, modulePath: string): Result<number> => {
     try {
@@ -401,7 +404,8 @@ const loadDevModule = async (
         return mtime;
     }
 
-    const cached = cache.read(modulePath, mtime.value);
+    const cacheKey = createDevCompileCacheKey(rootDir, modulePath);
+    const cached = cache.read(cacheKey, mtime.value);
     if (cached !== undefined) {
         return ok(cached);
     }
@@ -411,12 +415,12 @@ const loadDevModule = async (
         return loaded;
     }
 
-    cache.write(modulePath, mtime.value, loaded.value);
+    cache.write(cacheKey, mtime.value, loaded.value);
     return loaded;
 };
 
 const compileChangedDevAsset = async (rootDir: string, modulePath: string, cache: DevCompileCache): Promise<void> => {
-    cache.invalidate(modulePath);
+    cache.invalidate(createDevCompileCacheKey(rootDir, modulePath));
     const compiled = await loadDevModule(rootDir, modulePath, cache, true);
     if (!compiled.ok) {
         console.error(compiled.error);
@@ -553,6 +557,17 @@ const createSSEResponse = (hub: DevReloadHub, signal: AbortSignal) => {
             "Content-Type": "text/event-stream",
         },
     });
+};
+
+const createInternalServerErrorResponse = (): Response => new Response("Internal Server Error", { status: 500 });
+
+const createDevModuleErrorResponse = (error: string): Response => {
+    if (error.startsWith("Missing file:")) {
+        return createNotFoundResponse();
+    }
+
+    console.error(error);
+    return createInternalServerErrorResponse();
 };
 
 const getRawRequestPathname = (requestUrl: string): string => {
@@ -898,7 +913,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
     const appComponentPath = resolveConfiguredPath(rootDir, config.value.appComponent, "src/App.svelte");
     const appComponentRelativeToRoot = relative(rootDir, appComponentPath);
     if (appComponentRelativeToRoot.startsWith("..") || isAbsolute(appComponentRelativeToRoot)) {
-        return fail(`Invalid appComponent in svelte-builder.config.ts: expected a path inside the project root.`);
+        return fail(`Invalid appComponent in svelte-builder.config.json: expected a path inside the project root.`);
     }
     const sourceRoot = resolveDevSourceRoot(rootDir, appComponentPath);
     const sourcePathPrefix = (() => {
@@ -981,14 +996,13 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                 }
 
                 if (isCompilableDevModule(resolvedNodeModulePath.value.modulePath)) {
-                    const compiled = await loadUncachedDevModule(
+                    const compiled = await loadDevModule(
                         resolvedNodeModulePath.value.packageRoot,
                         resolvedNodeModulePath.value.modulePath,
+                        reloadHub.cache,
                     );
                     if (!compiled.ok) {
-                        return compiled.error.startsWith("Missing file:")
-                            ? createNotFoundResponse()
-                            : new Response(compiled.error, { status: 500 });
+                        return createDevModuleErrorResponse(compiled.error);
                     }
 
                     return new Response(compiled.value, {
@@ -1016,9 +1030,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
 
                 const transpiled = await loadDevModule(rootDir, resolvedSourcePath.value.modulePath, reloadHub.cache);
                 if (!transpiled.ok) {
-                    return transpiled.error.startsWith("Missing file:")
-                        ? createNotFoundResponse()
-                        : new Response(transpiled.error, { status: 500 });
+                    return createDevModuleErrorResponse(transpiled.error);
                 }
 
                 return new Response(transpiled.value, {
@@ -1038,7 +1050,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
 
                 const source = await loadDevModule(rootDir, resolvedSourcePath.value.modulePath, reloadHub.cache);
                 if (!source.ok) {
-                    return source.error.startsWith("Missing file:") ? createNotFoundResponse() : new Response(source.error, { status: 500 });
+                    return createDevModuleErrorResponse(source.error);
                 }
 
                 return new Response(source.value, {
@@ -1058,7 +1070,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
 
                 const compiled = await loadDevModule(rootDir, resolvedSourcePath.value.modulePath, reloadHub.cache);
                 if (!compiled.ok) {
-                    return compiled.error.startsWith("Missing file:") ? createNotFoundResponse() : new Response(compiled.error, { status: 500 });
+                    return createDevModuleErrorResponse(compiled.error);
                 }
 
                 return new Response(compiled.value, {
@@ -1077,7 +1089,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
         },
         (error: Bun.ErrorLike) => {
             console.error(error);
-            return new Response("Internal Server Error", { status: 500 });
+            return createInternalServerErrorResponse();
         },
     );
 

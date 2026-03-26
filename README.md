@@ -12,6 +12,11 @@ Minimal Bun + Svelte 5 production build preset.
 
 配置是纯 JSON, 不执行项目代码。旧的 `svelte-builder.config.ts` 已不再支持; 如果你仍在使用它, 请迁移为 `svelte-builder.config.json`。
 
+配置文件采用严格字段校验:
+
+- 未知顶层字段会直接报错, 避免拼写错误静默回退到默认值
+- `rootDir` 仍会被兼容性地忽略, 因为项目根目录由配置文件所在目录自动推导
+
 这个 builder 只支持 SPA:
 
 - 固定 SPA 入口由 `appComponent` 指定, 默认 `src/App.svelte`
