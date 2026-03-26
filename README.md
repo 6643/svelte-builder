@@ -35,10 +35,11 @@ HTML 一律使用内置 shell:
 
 dev 源码边界:
 
-- dev 只直接暴露源码树里的 `.ts`、`.js`、`.svelte` 模块, 不直接暴露项目根上的 `svelte-builder.config.json`、测试文件或其他脚本
-- 若 `appComponent` 位于 `src/` 下的更深层目录, dev 仍会回收到 `src/` 作为源码服务和 watch 根
-- 若 `appComponent` 位于其他顶级源码目录, dev 会以该顶级目录作为源码服务和 watch 根
-- `appComponent` 若是符号链接, 它解析后的目标仍必须留在对应源码树内
+- 这里的“app 源码树”指 `appComponent` 归属的 `src/` 或其他顶级源码目录
+- dev 只直接暴露 app 源码树里的 `.ts`、`.js`、`.svelte` 模块, 不直接暴露项目根上的 `svelte-builder.config.json`、测试文件或其他脚本
+- 若 `appComponent` 位于 `src/` 下的更深层目录, dev 仍会回收到 `src/` 作为 app 源码树和 watch 根
+- 若 `appComponent` 位于其他顶级源码目录, dev 会以该顶级目录作为 app 源码树和 watch 根
+- `appComponent` 若是符号链接, 它解析后的目标仍必须留在对应的 app 源码树内
 
 公共配置与默认值:
 
@@ -48,7 +49,7 @@ dev 源码边界:
 | `mountId` | `"app"` | 只支持 DOM `id`, build/dev 都会把它写进内置 shell |
 | `appTitle` | `"Svelte Builder"` | 内置 shell 的 `<title>` |
 | `assetsDir` | `"assets"` | 可选静态资源目录, dev 直接读, build 复制到 `dist/assets/` |
-| `outDir` | `"dist"` | 生产输出目录, 必须是项目根内的独立目录, 不能指向项目根或落在 `appComponent` 所在源码树内 |
+| `outDir` | `"dist"` | 生产输出目录, 必须是项目根内的独立目录, 不能指向项目根或落在 app 源码树内 |
 | `port` | `3000` | dev server 监听端口 |
 | `sourcemap` | `false` | 生产构建是否输出 inline sourcemap |
 | `stripSvelteDiagnostics` | `true` | 是否裁剪 Svelte 运行时详细诊断文案, 默认保留短错误码/警告码 |
@@ -132,7 +133,7 @@ src/lazy/ButtonDemo.svelte   2026-03-18 11:11:11  4.1 KiB  1.9 KiB
 
 - 最终产物直接写入当前项目的 `<outDir>/`
 - 同一输出目录只允许一个构建进程写入
-- `outDir` 必须位于项目根目录内, 且必须是独立输出目录, 不能配置为 `.` 或覆盖 `appComponent` 所在源码树
+- `outDir` 必须位于项目根目录内, 且必须是独立输出目录, 不能配置为 `.` 或落在 app 源码树内
 - 只有在新产物准备完成后才会切换到 `<outDir>/`; 若最终发布失败, 现有输出目录会保留
 - 若检测到失效的 `dist.lock`, 构建会自动回收后继续
 
@@ -141,7 +142,7 @@ src/lazy/ButtonDemo.svelte   2026-03-18 11:11:11  4.1 KiB  1.9 KiB
 - 配置文件固定为 `svelte-builder.config.json`, 它是纯 JSON 配置, 不执行项目代码
 - 旧的 `svelte-builder.config.ts` 已不再支持; 若项目中仍存在该文件, 请迁移并重命名为 `svelte-builder.config.json`
 - dev server 的设计目标是本地开发, 不应当作为公网服务暴露; 当前 HTTP 500 响应会对客户端隐藏内部错误细节, 但控制台仍会输出完整异常, 方便本地排查
-- dev 只暴露受控源码树、`/_node_modules/*` 和 `/assets/*`, 并对路径穿越与符号链接逃逸做了边界校验, 但这不等于适合承载不可信访问流量
+- dev 只暴露受控 app 源码树、`/_node_modules/*` 和 `/assets/*`, 并对路径穿越与符号链接逃逸做了边界校验, 但这不等于适合承载不可信访问流量
 - 若要部署到生产环境, 建议在反向代理或静态托管层补充安全响应头, 至少包括 `Content-Security-Policy`、`X-Content-Type-Options: nosniff` 和合适的 `Referrer-Policy`
 
 安装依赖:
