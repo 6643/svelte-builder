@@ -191,10 +191,32 @@ const validateAppComponent = (value: unknown, field: string): Result<string> => 
     return ok(normalizedAppComponent);
 };
 
+export const resolveAppSourceRoot = (
+    rootDir: string,
+    appComponentPath: string,
+    configFileName = CONFIG_FILE_NAME,
+): Result<string> => {
+    const appComponentRelativeToRoot = relative(rootDir, appComponentPath);
+    if (appComponentRelativeToRoot.startsWith("..") || isAbsolute(appComponentRelativeToRoot)) {
+        return fail(`Invalid appComponent in ${configFileName}: expected a path inside the project root.`);
+    }
+
+    const segments = appComponentRelativeToRoot.split(/[\\/]/).filter((segment) => segment.length > 0);
+    const [topLevelDir] = segments;
+
+    if (topLevelDir === undefined || segments.length <= 1) {
+        return fail(
+            `Invalid appComponent in ${configFileName}: expected a component path inside src/ or another top-level source directory.`,
+        );
+    }
+
+    return ok(topLevelDir === "src" ? join(rootDir, "src") : join(rootDir, topLevelDir));
+};
+
 const validateOutDir = (
     rootDir: string,
     outDir: string,
-    appComponentPath: string,
+    appSourceRoot: string,
 ): Result<string> => {
     if (!isPathWithinRoot(rootDir, outDir) || outDir === rootDir) {
         return fail(
@@ -202,8 +224,8 @@ const validateOutDir = (
         );
     }
 
-    if (isPathWithinRoot(outDir, appComponentPath)) {
-        return fail(`Invalid outDir in ${CONFIG_FILE_NAME}: outDir must not overlap the appComponent source tree.`);
+    if (isPathWithinRoot(outDir, appSourceRoot) || isPathWithinRoot(appSourceRoot, outDir)) {
+        return fail(`Invalid outDir in ${CONFIG_FILE_NAME}: outDir must not overlap the app source tree.`);
     }
 
     return ok(outDir);
@@ -712,9 +734,9 @@ export const buildSvelte = async (options: BuildSvelteOptions = {}): Promise<Res
         return appComponent;
     }
     const appComponentPath = resolveConfiguredPath(rootDir, appComponent.value, "src/App.svelte");
-    const appComponentRelativeToRoot = relative(rootDir, appComponentPath);
-    if (appComponentRelativeToRoot.startsWith("..") || isAbsolute(appComponentRelativeToRoot)) {
-        return fail(`Invalid appComponent in ${CONFIG_FILE_NAME}: expected a path inside the project root.`);
+    const appSourceRoot = resolveAppSourceRoot(rootDir, appComponentPath);
+    if (!appSourceRoot.ok) {
+        return appSourceRoot;
     }
     const appTitle = options.appTitle ?? DEFAULT_HTML_SHELL.title;
     const buildNonce = createBuildNonce();
@@ -727,7 +749,7 @@ export const buildSvelte = async (options: BuildSvelteOptions = {}): Promise<Res
         return fail(assetsDir.error);
     }
 
-    const validatedOutDir = validateOutDir(rootDir, outDir, appComponentPath);
+    const validatedOutDir = validateOutDir(rootDir, outDir, appSourceRoot.value);
     if (!validatedOutDir.ok) {
         return validatedOutDir;
     }

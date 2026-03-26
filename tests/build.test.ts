@@ -1059,6 +1059,54 @@ test("buildSvelte rejects outDir that resolves to the project root", async () =>
     expect(result.error).toMatch(/inside the project root|dedicated build output directory/i);
 });
 
+test("buildSvelte rejects root-level appComponent paths outside a source directory", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-root-level-app-component-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    writeFileSync(join(rootDir, "App.svelte"), "<h1>root app</h1>");
+
+    const { buildSvelte } = await import("../src/index.ts");
+    const result = await buildSvelte({
+        appComponent: "App.svelte",
+        rootDir,
+    });
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        throw new Error("Expected buildSvelte to reject root-level appComponent paths");
+    }
+
+    expect(result.error).toContain("appComponent");
+    expect(result.error).toMatch(/source directory|top-level source/i);
+});
+
+test("buildSvelte rejects outDir that overlaps the broader source tree", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-outdir-source-tree-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    writeFileSync(join(rootDir, "src", "app", "App.svelte"), "<h1>nested app</h1>");
+
+    const { buildSvelte } = await import("../src/index.ts");
+    const result = await buildSvelte({
+        appComponent: "src/app/App.svelte",
+        outDir: "src/dist",
+        rootDir,
+    });
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        throw new Error("Expected buildSvelte to reject outDir that overlaps the broader source tree");
+    }
+
+    expect(result.error).toContain("outDir");
+    expect(result.error).toMatch(/source tree|source directory|overlap/i);
+});
+
 test("runConfiguredBuild ignores rootDir in svelte-builder.config.json", async () => {
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-root-"));
     const ignoredRootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-config-ignored-root-"));
@@ -2982,6 +3030,35 @@ test("runConfiguredDevServer rejects escaped project source paths and still serv
     } finally {
         await result.value.stop();
     }
+    }));
+
+test("runConfiguredDevServer rejects root-level appComponent paths outside a source directory", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-root-app-boundary-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    mkdirSync(join(rootDir, "tests"), { recursive: true });
+    writeFileSync(join(rootDir, "App.svelte"), "<h1>root app</h1>");
+    writeFileSync(join(rootDir, "tests", "leak.ts"), 'export const leaked = "test-source";');
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ appComponent: "App.svelte", port: devPort }, null, 4),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        await result.value.stop();
+        throw new Error("Expected runConfiguredDevServer to reject root-level appComponent paths");
+    }
+
+    expect(result.error).toContain("appComponent");
+    expect(result.error).toMatch(/source directory|top-level source/i);
     }));
 
 test("runConfiguredDevServer rejects escaped node_modules paths and still serves valid node_modules files", async () =>

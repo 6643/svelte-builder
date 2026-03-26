@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
 import { compile } from "svelte/compiler";
-import { createHtmlShell, type BuildSvelteOptions, type Result, loadSvelteConfig } from "./build";
+import { createHtmlShell, type BuildSvelteOptions, type Result, loadSvelteConfig, resolveAppSourceRoot } from "./build";
 import { createBootstrapSource, createImportPath, resolveConfiguredPath } from "./bootstrap";
 import { resolveConfiguredAssetsDir, resolvePhysicalAssetPath } from "./assets";
 import { formatAssetReport } from "./report";
@@ -916,13 +916,12 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
     const mountId = config.value.mountId ?? "app";
     const appTitle = config.value.appTitle ?? "Svelte Builder";
     const appComponentPath = resolveConfiguredPath(rootDir, config.value.appComponent, "src/App.svelte");
-    const appComponentRelativeToRoot = relative(rootDir, appComponentPath);
-    if (appComponentRelativeToRoot.startsWith("..") || isAbsolute(appComponentRelativeToRoot)) {
-        return fail(`Invalid appComponent in svelte-builder.config.json: expected a path inside the project root.`);
+    const sourceRoot = resolveAppSourceRoot(rootDir, appComponentPath);
+    if (!sourceRoot.ok) {
+        return sourceRoot;
     }
-    const sourceRoot = resolveDevSourceRoot(rootDir, appComponentPath);
     const sourcePathPrefix = (() => {
-        const relativeSourceRoot = normalizeModulePath(relative(rootDir, sourceRoot));
+        const relativeSourceRoot = normalizeModulePath(relative(rootDir, sourceRoot.value));
         if (relativeSourceRoot.length === 0 || relativeSourceRoot === ".") {
             return undefined;
         }
@@ -1029,7 +1028,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                     return new Response("Not Found", { status: 404 });
                 }
 
-                if (!isPathInsideRoot(sourceRoot, resolvedSourcePath.value.resolvedPath)) {
+                if (!isPathInsideRoot(sourceRoot.value, resolvedSourcePath.value.resolvedPath)) {
                     return new Response("Not Found", { status: 404 });
                 }
 
@@ -1049,7 +1048,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                     return new Response("Not Found", { status: 404 });
                 }
 
-                if (!isPathInsideRoot(sourceRoot, resolvedSourcePath.value.resolvedPath)) {
+                if (!isPathInsideRoot(sourceRoot.value, resolvedSourcePath.value.resolvedPath)) {
                     return new Response("Not Found", { status: 404 });
                 }
 
@@ -1069,7 +1068,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                     return new Response("Not Found", { status: 404 });
                 }
 
-                if (!isPathInsideRoot(sourceRoot, resolvedSourcePath.value.resolvedPath)) {
+                if (!isPathInsideRoot(sourceRoot.value, resolvedSourcePath.value.resolvedPath)) {
                     return new Response("Not Found", { status: 404 });
                 }
 

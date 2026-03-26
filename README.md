@@ -23,6 +23,7 @@ Minimal Bun + Svelte 5 production build preset.
 - 不支持多页面
 - `entrypoint` 已删除
 - `appComponent` 默认 `src/App.svelte`
+- `appComponent` 必须位于 `src/` 或其他顶级源码目录下, 不支持直接把组件放在项目根目录
 - 配置文件所在目录会自动作为项目根, `rootDir` 是内部推导值, 不需要手填
 
 HTML 一律使用内置 shell:
@@ -46,7 +47,7 @@ dev 源码边界:
 | `mountId` | `"app"` | 只支持 DOM `id`, build/dev 都会把它写进内置 shell |
 | `appTitle` | `"Svelte Builder"` | 内置 shell 的 `<title>` |
 | `assetsDir` | `"assets"` | 可选静态资源目录, dev 直接读, build 复制到 `dist/assets/` |
-| `outDir` | `"dist"` | 生产输出目录, 必须是项目根内的独立目录, 不能指向项目根或覆盖源码树 |
+| `outDir` | `"dist"` | 生产输出目录, 必须是项目根内的独立目录, 不能指向项目根或落在 `appComponent` 所在源码树内 |
 | `port` | `3000` | dev server 监听端口 |
 | `sourcemap` | `false` | 生产构建是否输出 inline sourcemap |
 | `stripSvelteDiagnostics` | `true` | 是否裁剪 Svelte 运行时详细诊断文案, 默认保留短错误码/警告码 |
