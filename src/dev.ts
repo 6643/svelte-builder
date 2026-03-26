@@ -453,6 +453,11 @@ const createDevReloadHub = (watchDir: string, watchRoots: DevWatchRoot[]): DevRe
         }
     };
 
+    const isWatchableDirectory = (path: string): boolean => {
+        const entry = lstatSync(path);
+        return entry.isDirectory() && !entry.isSymbolicLink();
+    };
+
     const watchDirectory = (dir: string, recursive: boolean) => {
         if (watchedDirs.has(dir)) {
             return;
@@ -502,7 +507,7 @@ const createDevReloadHub = (watchDir: string, watchRoots: DevWatchRoot[]): DevRe
             if (recursive) {
                 readdirSync(dir).forEach((file) => {
                     const fullPath = join(dir, file);
-                    if (statSync(fullPath).isDirectory() && !isExcludedWatchDirectory(file) && !file.startsWith(".")) {
+                    if (isWatchableDirectory(fullPath) && !isExcludedWatchDirectory(file) && !file.startsWith(".")) {
                         watchDirectory(fullPath, true);
                     }
                 });
