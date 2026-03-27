@@ -3912,7 +3912,7 @@ test("runConfiguredDevServer rejects escaped relative imports introduced after s
 
 test("runConfiguredDevServer rejects unsupported local source module extensions introduced in App.svelte after startup", async () =>
     runSequentialDevTest(async () => {
-    for (const extension of [".jsx", ".mts"] as const) {
+    for (const extension of [".jsx", ".mts", ".d.ts"] as const) {
         const devPort = await allocateFreePort();
         const rootDir = mkdtempSync(join(process.cwd(), `.tmp-bsb-dev-runtime-unsupported-app-import-${extension.slice(1)}-`));
         createdDirs.push(rootDir);
@@ -4016,7 +4016,7 @@ test("runConfiguredDevServer rejects escaped relative imports introduced in Java
 
 test("runConfiguredDevServer rejects unsupported local source module extensions introduced in JavaScript helpers after startup", async () =>
     runSequentialDevTest(async () => {
-    for (const extension of [".jsx", ".mts"] as const) {
+    for (const extension of [".jsx", ".mts", ".d.ts"] as const) {
         const devPort = await allocateFreePort();
         const rootDir = mkdtempSync(join(process.cwd(), `.tmp-bsb-dev-runtime-unsupported-js-import-${extension.slice(1)}-`));
         createdDirs.push(rootDir);
@@ -4072,7 +4072,7 @@ test("runConfiguredDevServer rejects unsupported local source module extensions 
 
 test("runConfiguredDevServer rejects unsupported local source module extensions introduced in TypeScript helpers after startup", async () =>
     runSequentialDevTest(async () => {
-    for (const extension of [".jsx", ".mts"] as const) {
+    for (const extension of [".jsx", ".mts", ".d.ts"] as const) {
         const devPort = await allocateFreePort();
         const rootDir = mkdtempSync(join(process.cwd(), `.tmp-bsb-dev-runtime-unsupported-ts-import-${extension.slice(1)}-`));
         createdDirs.push(rootDir);
