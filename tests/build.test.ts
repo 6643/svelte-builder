@@ -3226,6 +3226,46 @@ test("runConfiguredDevServer rejects appComponent symlinks that resolve outside 
     expect(result.error).toMatch(/source tree|source directory|project root/i);
     }));
 
+test("runConfiguredDevServer rejects relative imports that resolve outside the app source tree", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-relative-import-escape-"));
+    const outsideDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-relative-import-escape-outside-"));
+    createdDirs.push(rootDir, outsideDir);
+
+    mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    const escapedImport = relative(join(rootDir, "src", "app"), join(outsideDir, "escaped.js")).replaceAll("\\", "/");
+
+    writeFileSync(
+        join(rootDir, "src", "app", "App.svelte"),
+        [
+            "<script>",
+            `  import { leaked } from ${JSON.stringify(escapedImport)};`,
+            "</script>",
+            "",
+            "<h1>{leaked}</h1>",
+        ].join("\n"),
+    );
+    writeFileSync(join(outsideDir, "escaped.js"), 'export const leaked = "outside-relative-js";');
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ appComponent: "src/app/App.svelte", port: devPort }, null, 4),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        await result.value.stop();
+        throw new Error("Expected runConfiguredDevServer to reject relative imports that escape the app source tree");
+    }
+
+    expect(result.error).toContain("app source tree");
+    }));
+
 test("runConfiguredDevServer fails fast when the configured appComponent file is missing", async () =>
     runSequentialDevTest(async () => {
     const devPort = await allocateFreePort();
