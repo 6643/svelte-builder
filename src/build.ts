@@ -75,7 +75,7 @@ const getErrorCode = (error: unknown): string | undefined =>
     error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined;
 
 const isRelativeImportSpecifier = (specifier: string): boolean => specifier.startsWith("./") || specifier.startsWith("../");
-const isLocalFileImportSpecifier = (specifier: string): boolean => specifier.startsWith("file:");
+const isLocalFileImportSpecifier = (specifier: string): boolean => specifier.startsWith("file:") || isAbsolute(specifier);
 
 const escapeHtml = (value: string): string =>
     value
