@@ -75,6 +75,7 @@ const getErrorCode = (error: unknown): string | undefined =>
     error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined;
 
 const isRelativeImportSpecifier = (specifier: string): boolean => specifier.startsWith("./") || specifier.startsWith("../");
+const isLocalFileImportSpecifier = (specifier: string): boolean => specifier.startsWith("file:");
 
 const escapeHtml = (value: string): string =>
     value
@@ -320,11 +321,15 @@ export const validateLocalSourceImportGraph = async (entryPath: string, allowedR
                 buildImportScanner
                     .scanImports(source.value)
                     .map((record) => record.path)
-                    .filter(isRelativeImportSpecifier),
+                    .filter((specifier) => isRelativeImportSpecifier(specifier) || isLocalFileImportSpecifier(specifier)),
             ),
         );
 
         for (const specifier of specifiers) {
+            if (isLocalFileImportSpecifier(specifier)) {
+                return fail(`Local import escaped app source tree: ${specifier} from ${currentPath}`);
+            }
+
             const resolvedImport = await resolveRelativeImportPath(specifier, currentPath);
             if (!resolvedImport.ok) {
                 return resolvedImport;

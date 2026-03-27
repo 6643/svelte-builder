@@ -40,6 +40,7 @@ dev 源码边界:
 - 若 `appComponent` 位于 `src/` 下的更深层目录, dev 仍会回收到 `src/` 作为 app 源码树和 watch 根
 - 若 `appComponent` 位于其他顶级源码目录, dev 会以该顶级目录作为 app 源码树和 watch 根
 - `appComponent` 若是符号链接, 它解析后的目标仍必须留在对应的 app 源码树内
+- 本地源码导入必须留在 app 源码树内; 不支持 `file://` 这类直接文件导入
 
 公共配置与默认值:
 
