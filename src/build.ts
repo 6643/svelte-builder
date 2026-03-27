@@ -288,7 +288,7 @@ const loadImportValidationSource = async (path: string): Promise<Result<string>>
     return ok(source.value);
 };
 
-const validateLocalSourceImportGraph = async (entryPath: string, allowedRoots: string[]): Promise<Result<void>> => {
+export const validateLocalSourceImportGraph = async (entryPath: string, allowedRoots: string[]): Promise<Result<void>> => {
     const pending = [entryPath];
     const visited = new Set<string>();
 
