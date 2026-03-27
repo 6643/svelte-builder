@@ -405,7 +405,7 @@ const loadDevModule = async (
     allowedRoots?: string[],
     shouldLog = false,
 ): Promise<Result<string>> => {
-    if (allowedRoots !== undefined && modulePath.endsWith(".svelte")) {
+    if (allowedRoots !== undefined && isCompilableDevModule(modulePath)) {
         const validatedImportGraph = await validateLocalSourceImportGraph(join(rootDir, modulePath), allowedRoots);
         if (!validatedImportGraph.ok) {
             return validatedImportGraph;
@@ -1080,7 +1080,13 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                     return new Response("Not Found", { status: 404 });
                 }
 
-                const transpiled = await loadDevModule(rootDir, resolvedSourcePath.value.modulePath, reloadHub.cache);
+                const allowedSourceRoots = [realpathSync(sourceRoot.value)];
+                const transpiled = await loadDevModule(
+                    rootDir,
+                    resolvedSourcePath.value.modulePath,
+                    reloadHub.cache,
+                    allowedSourceRoots,
+                );
                 if (!transpiled.ok) {
                     return createDevModuleErrorResponse(transpiled.error);
                 }
@@ -1100,7 +1106,13 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                     return new Response("Not Found", { status: 404 });
                 }
 
-                const source = await loadDevModule(rootDir, resolvedSourcePath.value.modulePath, reloadHub.cache);
+                const allowedSourceRoots = [realpathSync(sourceRoot.value)];
+                const source = await loadDevModule(
+                    rootDir,
+                    resolvedSourcePath.value.modulePath,
+                    reloadHub.cache,
+                    allowedSourceRoots,
+                );
                 if (!source.ok) {
                     return createDevModuleErrorResponse(source.error);
                 }

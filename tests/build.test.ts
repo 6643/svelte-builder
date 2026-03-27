@@ -3314,6 +3314,116 @@ test("runConfiguredDevServer rejects escaped relative imports introduced after s
     }
     }));
 
+test("runConfiguredDevServer rejects escaped relative imports introduced in JavaScript helpers after startup", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-runtime-js-import-escape-"));
+    const outsideDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-runtime-js-import-escape-outside-"));
+    createdDirs.push(rootDir, outsideDir);
+
+    mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    writeFileSync(join(rootDir, "src", "app", "helper.js"), 'export const helper = "safe";');
+    writeFileSync(
+        join(rootDir, "src", "app", "App.svelte"),
+        [
+            "<script>",
+            '  import { helper } from "./helper.js";',
+            "</script>",
+            "",
+            "<h1>{helper}</h1>",
+        ].join("\n"),
+    );
+    writeFileSync(join(outsideDir, "escaped.js"), 'export const leaked = "outside-hot-js";');
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ appComponent: "src/app/App.svelte", port: devPort }, null, 4),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    try {
+        const escapedImport = relative(join(rootDir, "src", "app"), join(outsideDir, "escaped.js")).replaceAll("\\", "/");
+        writeFileSync(
+            join(rootDir, "src", "app", "helper.js"),
+            [
+                `import { leaked } from ${JSON.stringify(escapedImport)};`,
+                "export const helper = leaked;",
+            ].join("\n"),
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 400));
+
+        const response = await requestDevServerPath(result.value.port, "/src/app/helper.js");
+
+        expect(response.status).toBe(500);
+        expect(response.body).toBe("Internal Server Error");
+        expect(response.body).not.toContain("outside-hot-js");
+    } finally {
+        await result.value.stop();
+    }
+    }));
+
+test("runConfiguredDevServer rejects escaped relative imports introduced in TypeScript helpers after startup", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-runtime-ts-import-escape-"));
+    const outsideDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-runtime-ts-import-escape-outside-"));
+    createdDirs.push(rootDir, outsideDir);
+
+    mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    writeFileSync(join(rootDir, "src", "app", "helper.ts"), 'export const helper = "safe";');
+    writeFileSync(
+        join(rootDir, "src", "app", "App.svelte"),
+        [
+            "<script>",
+            '  import { helper } from "./helper.ts";',
+            "</script>",
+            "",
+            "<h1>{helper}</h1>",
+        ].join("\n"),
+    );
+    writeFileSync(join(outsideDir, "escaped.js"), 'export const leaked = "outside-hot-ts";');
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ appComponent: "src/app/App.svelte", port: devPort }, null, 4),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    try {
+        const escapedImport = relative(join(rootDir, "src", "app"), join(outsideDir, "escaped.js")).replaceAll("\\", "/");
+        writeFileSync(
+            join(rootDir, "src", "app", "helper.ts"),
+            [
+                `import { leaked } from ${JSON.stringify(escapedImport)};`,
+                "export const helper = leaked;",
+            ].join("\n"),
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 400));
+
+        const response = await requestDevServerPath(result.value.port, "/src/app/helper.ts");
+
+        expect(response.status).toBe(500);
+        expect(response.body).toBe("Internal Server Error");
+        expect(response.body).not.toContain("outside-hot-ts");
+    } finally {
+        await result.value.stop();
+    }
+    }));
+
 test("runConfiguredDevServer fails fast when the configured appComponent file is missing", async () =>
     runSequentialDevTest(async () => {
     const devPort = await allocateFreePort();
