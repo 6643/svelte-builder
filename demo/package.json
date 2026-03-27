@@ -7,7 +7,7 @@
         "svelte": "next"
     },
     "scripts": {
-        "build": "bun ./node_modules/.bin/svelte-builder build",
-        "dev": "bun ./node_modules/.bin/svelte-builder dev"
+        "build": "svelte-builder build",
+        "dev": "svelte-builder dev"
     }
 }

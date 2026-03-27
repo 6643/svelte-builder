@@ -200,13 +200,7 @@ const findUnsupportedDynamicImportExpression = (
                 }
 
                 if (argumentStart === "`") {
-                    const template = findUnsupportedDynamicImportExpression(source, nextIndex);
-                    if (template.unsupported) {
-                        return template;
-                    }
-
-                    index = template.next;
-                    continue;
+                    return { next: nextIndex, unsupported: true };
                 }
 
                 return { next: nextIndex, unsupported: true };
@@ -405,7 +399,7 @@ const buildImportScanner = new Bun.Transpiler({ loader: "js" });
 const buildTypeScriptTranspiler = new Bun.Transpiler({ loader: "ts" });
 
 const isCompilableSourceModule = (path: string): boolean =>
-    path.endsWith(".svelte") || path.endsWith(".ts") || path.endsWith(".js");
+    path.endsWith(".svelte") || path.endsWith(".ts") || path.endsWith(".js") || path.endsWith(".mjs");
 
 const loadImportValidationSource = async (path: string): Promise<Result<string>> => {
     if (path.endsWith(".svelte")) {

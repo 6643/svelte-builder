@@ -245,7 +245,7 @@ const rewriteBareImportsForDev = async (source: string, importerPath: string): P
 };
 
 const isCompilableDevModule = (filePath: string): boolean =>
-    filePath.endsWith(".svelte") || filePath.endsWith(".ts") || filePath.endsWith(".js");
+    filePath.endsWith(".svelte") || filePath.endsWith(".ts") || filePath.endsWith(".js") || filePath.endsWith(".mjs");
 
 const isExcludedWatchDirectory = (dirName: string): boolean => EXCLUDED_DIRS.includes(dirName);
 
@@ -393,7 +393,7 @@ const loadUncachedDevModule = async (rootDir: string, modulePath: string, should
         return compileSvelteForDev(rootDir, modulePath, shouldLog);
     }
 
-    if (modulePath.endsWith(".js")) {
+    if (modulePath.endsWith(".js") || modulePath.endsWith(".mjs")) {
         const source = await loadRequiredText(join(rootDir, modulePath));
         if (!source.ok) {
             return source;
@@ -1193,7 +1193,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                 });
             }
 
-            if (rawPathname.endsWith(".js")) {
+            if (rawPathname.endsWith(".js") || rawPathname.endsWith(".mjs")) {
                 const resolvedSourcePath = await resolveDevRequestPath(rootDir, rawPathname, "/");
                 if (!resolvedSourcePath.ok) {
                     return new Response("Not Found", { status: 404 });

@@ -624,8 +624,8 @@ test("root scripts expose check commands and demo is documented as repo-local do
     expect(rootPackageJson.scripts?.check).toContain("bun run typecheck");
     expect(rootPackageJson.scripts?.check).toContain("bun test");
     expect(examplePackageJson.dependencies?.["svelte-builder"]).toBe("file:..");
-    expect(examplePackageJson.scripts?.build).toBe("bun ./node_modules/.bin/svelte-builder build");
-    expect(examplePackageJson.scripts?.dev).toBe("bun ./node_modules/.bin/svelte-builder dev");
+    expect(examplePackageJson.scripts?.build).toBe("svelte-builder build");
+    expect(examplePackageJson.scripts?.dev).toBe("svelte-builder dev");
     expect(rootReadme).toContain("`demo` 是仓库内 dogfood 示例");
     expect(rootReadme).toContain("不作为发布包消费者模板");
 });
@@ -676,11 +676,31 @@ test("repository root package includes release metadata, license, and package-fo
     expect(existsSync(join(process.cwd(), "LICENSE"))).toBe(true);
     expect(rootReadme).not.toContain("这个仓库当前的主包入口");
     expect(rootReadme).not.toContain("bun ./node_modules/svelte-builder/src/cli.ts");
+    expect(rootReadme).not.toContain("bun ./node_modules/.bin/svelte-builder");
     expect(rootReadme).toContain("svelte-builder dev");
     expect(rootReadme).toContain("svelte-builder build");
     expect(rootReadme).not.toContain("defineSvelteConfig(");
     expect(rootReadme).not.toContain("export default defineSvelteConfig");
     expect(rootReadme).toContain('"appComponent": "src/App.svelte"');
+});
+
+test("installed cli bin runs directly without wrapping it in bun", () => {
+    const demoRoot = join(process.cwd(), "demo");
+    const demoDistDir = join(demoRoot, "dist");
+    const installedBin = join(demoRoot, "node_modules", ".bin", "svelte-builder");
+
+    rmSync(demoDistDir, { recursive: true, force: true });
+
+    const result = spawnSync(installedBin, ["build"], {
+        cwd: demoRoot,
+        encoding: "utf8",
+    });
+
+    rmSync(demoDistDir, { recursive: true, force: true });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Entry assets");
+    expect(result.stderr).toBe("");
 });
 
 test("tsconfig excludes generated dist directories from typechecking", () => {
@@ -1250,6 +1270,81 @@ test("buildSvelte rejects dynamic import expressions that cannot be validated in
     }
 
     expect(result.error).toContain("Dynamic import expressions");
+});
+
+test("buildSvelte rejects template-literal dynamic imports even when they look local", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dynamic-import-template-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(
+        join(rootDir, "src", "app", "App.svelte"),
+        [
+            "<script>",
+            '  const target = "./helper";',
+            "  import(`${target}.js`);",
+            "</script>",
+            "",
+            "<h1>dyn template</h1>",
+        ].join("\n"),
+    );
+    writeFileSync(join(rootDir, "src", "app", "helper.js"), 'export const helper = "inside";');
+
+    const { buildSvelte } = await import("../src/index.ts");
+    const result = await buildSvelte({
+        appComponent: "src/app/App.svelte",
+        rootDir,
+    });
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        throw new Error("Expected buildSvelte to reject template-literal dynamic import expressions");
+    }
+
+    expect(result.error).toContain("Dynamic import expressions");
+});
+
+test("buildSvelte rejects .mjs helpers that escape the app source tree", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-mjs-import-escape-"));
+    const outsideDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-mjs-import-escape-outside-"));
+    createdDirs.push(rootDir, outsideDir);
+
+    mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    writeFileSync(join(outsideDir, "escaped.js"), 'export const leaked = "outside-mjs";');
+    const escapedImport = relative(join(rootDir, "src", "app"), join(outsideDir, "escaped.js")).replaceAll("\\", "/");
+
+    writeFileSync(
+        join(rootDir, "src", "app", "proxy.mjs"),
+        `export { leaked } from ${JSON.stringify(escapedImport)};\n`,
+    );
+    writeFileSync(
+        join(rootDir, "src", "app", "App.svelte"),
+        [
+            "<script>",
+            '  import { leaked } from "./proxy.mjs";',
+            "</script>",
+            "",
+            "<h1>{leaked}</h1>",
+        ].join("\n"),
+    );
+
+    const { buildSvelte } = await import("../src/index.ts");
+    const result = await buildSvelte({
+        appComponent: "src/app/App.svelte",
+        rootDir,
+    });
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        throw new Error("Expected buildSvelte to reject .mjs helpers that escape the app source tree");
+    }
+
+    expect(result.error).toContain("app source tree");
 });
 
 test("buildSvelte rejects outDir that overlaps the broader source tree", async () => {
@@ -2443,6 +2538,49 @@ test("runConfiguredDevServer serves a generated bootstrap module without main.ts
     expect(source).not.toContain(')!');
     }));
 
+test("runConfiguredDevServer serves local .mjs helpers from the app source tree", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-mjs-helper-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(join(rootDir, "src", "helper.mjs"), 'export const helper = "safe-mjs";');
+    writeFileSync(
+        join(rootDir, "src", "App.svelte"),
+        [
+            "<script>",
+            '  import { helper } from "./helper.mjs";',
+            "</script>",
+            "",
+            "<h1>{helper}</h1>",
+        ].join("\n"),
+    );
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ port: devPort }, null, 4),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    try {
+        const response = await fetch(`http://127.0.0.1:${result.value.port}/src/helper.mjs`);
+        const body = await response.text();
+
+        expect(response.status).toBe(200);
+        expect(body).toContain('export const helper = "safe-mjs";');
+    } finally {
+        await result.value.stop();
+    }
+    }));
+
 test("runConfiguredDevServer reloads updated JSON config for app shell and bootstrap", async () =>
     runSequentialDevTest(async () => {
     const devPort = await allocateFreePort();
@@ -3555,6 +3693,89 @@ test("runConfiguredDevServer rejects dynamic import expressions that cannot be v
     }
 
     expect(result.error).toContain("Dynamic import expressions");
+    }));
+
+test("runConfiguredDevServer rejects template-literal dynamic import expressions at startup", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-dynamic-import-template-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(
+        join(rootDir, "src", "app", "App.svelte"),
+        [
+            "<script>",
+            '  const target = "./helper";',
+            "  import(`${target}.js`);",
+            "</script>",
+            "",
+            "<h1>dyn template</h1>",
+        ].join("\n"),
+    );
+    writeFileSync(join(rootDir, "src", "app", "helper.js"), 'export const helper = "inside";');
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ appComponent: "src/app/App.svelte", port: devPort }, null, 4),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        await result.value.stop();
+        throw new Error("Expected runConfiguredDevServer to reject template-literal dynamic import expressions");
+    }
+
+    expect(result.error).toContain("Dynamic import expressions");
+    }));
+
+test("runConfiguredDevServer rejects .mjs helpers that escape the app source tree at startup", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-mjs-import-escape-"));
+    const outsideDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-mjs-import-escape-outside-"));
+    createdDirs.push(rootDir, outsideDir);
+
+    mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    writeFileSync(join(outsideDir, "escaped.js"), 'export const leaked = "outside-hot-mjs";');
+    const escapedImport = relative(join(rootDir, "src", "app"), join(outsideDir, "escaped.js")).replaceAll("\\", "/");
+
+    writeFileSync(
+        join(rootDir, "src", "app", "proxy.mjs"),
+        `export { leaked } from ${JSON.stringify(escapedImport)};\n`,
+    );
+    writeFileSync(
+        join(rootDir, "src", "app", "App.svelte"),
+        [
+            "<script>",
+            '  import { leaked } from "./proxy.mjs";',
+            "</script>",
+            "",
+            "<h1>{leaked}</h1>",
+        ].join("\n"),
+    );
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ appComponent: "src/app/App.svelte", port: devPort }, null, 4),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        await result.value.stop();
+        throw new Error("Expected runConfiguredDevServer to reject .mjs helpers that escape the app source tree");
+    }
+
+    expect(result.error).toContain("app source tree");
     }));
 
 test("runConfiguredDevServer rejects escaped relative imports introduced after startup", async () =>

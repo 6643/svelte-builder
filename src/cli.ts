@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 import { runConfiguredBuild } from "./build";
 import { runConfiguredDevServer } from "./dev";
 import { formatBuildReport } from "./report";
