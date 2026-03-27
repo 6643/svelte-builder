@@ -19,6 +19,16 @@ export type DevWatchRoot = {
     recursive: boolean;
 };
 
+type DevRuntimeState = {
+    appComponentPath: string;
+    appTitle: string;
+    assetsDir: string | undefined;
+    mountId: string;
+    sourcePathPrefix: string | undefined;
+    sourceRoot: string;
+    watchRoots: DevWatchRoot[];
+};
+
 const EXCLUDED_DIRS = ["node_modules", ".git", "dist"];
 const DEV_WATCH_DEBOUNCE_MS = 100;
 const DEV_SPECIAL_IMPORTS = {
@@ -35,6 +45,7 @@ const fail = (error: string): Result<never> => ({ ok: false, error });
 const DEV_PORT_RETRY_LIMIT = 8;
 const DEV_PORT_RANGE_MAX = 65535;
 const DEV_PORT_RANGE_MIN = 49152;
+const DEV_CONFIG_FILE_NAME = "svelte-builder.config.json";
 const getErrorMessage = (error: unknown): string => {
     if (error instanceof Error) {
         return error.message;
@@ -334,6 +345,15 @@ const getDevModuleMtime = (rootDir: string, modulePath: string): Result<number> 
     }
 };
 
+const createSourcePathPrefix = (rootDir: string, sourceRoot: string): string | undefined => {
+    const relativeSourceRoot = normalizeModulePath(relative(rootDir, sourceRoot));
+    if (relativeSourceRoot.length === 0 || relativeSourceRoot === ".") {
+        return undefined;
+    }
+
+    return `/${relativeSourceRoot}/`;
+};
+
 const resolveDevSourceRoot = (rootDir: string, appComponentPath: string): string => {
     const relativeAppComponentPath = relative(rootDir, appComponentPath);
     const segments = relativeAppComponentPath.split(/[\\/]/).filter((segment) => segment.length > 0);
@@ -447,18 +467,24 @@ const compileChangedDevAsset = async (
 
 type DevReloadHub = {
     cache: DevCompileCache;
+    emit: (data: string) => void;
+    reconfigure: (watchRoots: DevWatchRoot[]) => void;
     stop: () => void;
     subscribe: (listener: (data: string) => void) => () => void;
 };
 
-const createDevReloadHub = (watchDir: string, watchRoots: DevWatchRoot[]): DevReloadHub => {
+const createDevReloadHub = (
+    watchDir: string,
+    watchRoots: DevWatchRoot[],
+    onConfigFileChange?: () => void | Promise<void>,
+): DevReloadHub => {
     const watchers: { close: () => void }[] = [];
     const listeners = new Set<(data: string) => void>();
     const recentEvents = new Map<string, number>();
     const watchedDirs = new Set<string>();
-    const recursiveWatchRoots = new Set(watchRoots.filter((root) => root.recursive).map((root) => root.path));
+    let recursiveWatchRoots = new Set(watchRoots.filter((root) => root.recursive).map((root) => root.path));
     const cache = createDevCompileCache();
-    const allowedRoots = Array.from(
+    let allowedRoots = Array.from(
         new Set(
             watchRoots
                 .filter((root) => root.recursive)
@@ -519,6 +545,13 @@ const createDevReloadHub = (watchDir: string, watchRoots: DevWatchRoot[]): DevRe
                         }
 
                         const relativePath = relative(watchDir, modulePath);
+                        if (relativePath === DEV_CONFIG_FILE_NAME) {
+                            void Promise.resolve(onConfigFileChange?.()).catch((error) => {
+                                console.error(getErrorMessage(error));
+                            });
+                            return;
+                        }
+
                         if (relativePath.startsWith("..") || relativePath.length === 0 || !isCompilableDevModule(relativePath)) {
                             return;
                         }
@@ -549,10 +582,36 @@ const createDevReloadHub = (watchDir: string, watchRoots: DevWatchRoot[]): DevRe
         }
     };
 
-    watchRoots.forEach((root) => watchDirectory(root.path, root.recursive));
+    const reconfigure = (nextWatchRoots: DevWatchRoot[]): void => {
+        watchers.forEach((watcher) => watcher.close());
+        watchers.length = 0;
+        watchedDirs.clear();
+        recentEvents.clear();
+
+        recursiveWatchRoots = new Set(nextWatchRoots.filter((root) => root.recursive).map((root) => root.path));
+        allowedRoots = Array.from(
+            new Set(
+                nextWatchRoots
+                    .filter((root) => root.recursive)
+                    .map((root) => {
+                        try {
+                            return realpathSync(root.path);
+                        } catch {
+                            return root.path;
+                        }
+                    }),
+            ),
+        );
+
+        nextWatchRoots.forEach((root) => watchDirectory(root.path, root.recursive));
+    };
+
+    reconfigure(watchRoots);
 
     return {
         cache,
+        emit: notify,
+        reconfigure,
         stop,
         subscribe: (listener) => {
             listeners.add(listener);
@@ -782,6 +841,50 @@ export const findNodeModulesRoot = async (startDir: string): Promise<Result<stri
     }
 };
 
+const deriveDevRuntimeState = async (
+    config: BuildSvelteOptions,
+    cwd = process.cwd(),
+): Promise<Result<DevRuntimeState>> => {
+    const rootDir = config.rootDir ?? cwd;
+    const mountId = config.mountId ?? "app";
+    const appTitle = config.appTitle ?? "Svelte Builder";
+    const appComponentPath = resolveConfiguredPath(rootDir, config.appComponent, "src/App.svelte");
+    const sourceRoot = resolveAppSourceRoot(rootDir, appComponentPath);
+    if (!sourceRoot.ok) {
+        return sourceRoot;
+    }
+
+    const appComponentExists = await Bun.file(appComponentPath).exists();
+    if (!appComponentExists) {
+        return fail(`Missing SPA app component: ${appComponentPath}`);
+    }
+
+    const validatedAppComponentPath = validateResolvedAppComponentPath(rootDir, sourceRoot.value, appComponentPath);
+    if (!validatedAppComponentPath.ok) {
+        return validatedAppComponentPath;
+    }
+
+    const validatedImportGraph = await validateLocalSourceImportGraph(appComponentPath, [realpathSync(sourceRoot.value)]);
+    if (!validatedImportGraph.ok) {
+        return validatedImportGraph;
+    }
+
+    const assetsDir = await resolveConfiguredAssetsDir(rootDir, config.assetsDir);
+    if (!assetsDir.ok) {
+        return assetsDir;
+    }
+
+    return ok({
+        appComponentPath,
+        appTitle,
+        assetsDir: assetsDir.value,
+        mountId,
+        sourcePathPrefix: createSourcePathPrefix(rootDir, sourceRoot.value),
+        sourceRoot: sourceRoot.value,
+        watchRoots: resolveDevWatchRoots(rootDir, assetsDir.value, appComponentPath),
+    });
+};
+
 const createImportMap = () => ({
     imports: DEV_SPECIAL_IMPORTS,
 });
@@ -944,38 +1047,11 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
     }
 
     const rootDir = config.value.rootDir ?? cwd;
-    const mountId = config.value.mountId ?? "app";
-    const appTitle = config.value.appTitle ?? "Svelte Builder";
-    const appComponentPath = resolveConfiguredPath(rootDir, config.value.appComponent, "src/App.svelte");
-    const sourceRoot = resolveAppSourceRoot(rootDir, appComponentPath);
-    if (!sourceRoot.ok) {
-        return sourceRoot;
+    const initialState = await deriveDevRuntimeState(config.value, rootDir);
+    if (!initialState.ok) {
+        return initialState;
     }
-    const appComponentExists = await Bun.file(appComponentPath).exists();
-    if (!appComponentExists) {
-        return fail(`Missing SPA app component: ${appComponentPath}`);
-    }
-
-    const validatedAppComponentPath = validateResolvedAppComponentPath(rootDir, sourceRoot.value, appComponentPath);
-    if (!validatedAppComponentPath.ok) {
-        return validatedAppComponentPath;
-    }
-    const validatedImportGraph = await validateLocalSourceImportGraph(appComponentPath, [realpathSync(sourceRoot.value)]);
-    if (!validatedImportGraph.ok) {
-        return validatedImportGraph;
-    }
-    const sourcePathPrefix = (() => {
-        const relativeSourceRoot = normalizeModulePath(relative(rootDir, sourceRoot.value));
-        if (relativeSourceRoot.length === 0 || relativeSourceRoot === ".") {
-            return undefined;
-        }
-
-        return `/${relativeSourceRoot}/`;
-    })();
-    const assetsDir = await resolveConfiguredAssetsDir(rootDir, config.value.assetsDir);
-    if (!assetsDir.ok) {
-        return assetsDir;
-    }
+    let currentState = initialState.value;
 
     const nodeModulesRoot = await findNodeModulesRoot(rootDir);
     if (!nodeModulesRoot.ok) {
@@ -983,7 +1059,25 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
     }
 
     const importMap = createImportMap();
-    const reloadHub = createDevReloadHub(rootDir, resolveDevWatchRoots(rootDir, assetsDir.value, appComponentPath));
+    let reloadHub: DevReloadHub;
+    const reloadConfig = async (): Promise<void> => {
+        const nextConfig = await loadSvelteConfig(rootDir);
+        if (!nextConfig.ok) {
+            console.error(nextConfig.error);
+            return;
+        }
+
+        const nextState = await deriveDevRuntimeState(nextConfig.value, rootDir);
+        if (!nextState.ok) {
+            console.error(nextState.error);
+            return;
+        }
+
+        currentState = nextState.value;
+        reloadHub.reconfigure(nextState.value.watchRoots);
+        reloadHub.emit("reload");
+    };
+    reloadHub = createDevReloadHub(rootDir, currentState.watchRoots, reloadConfig);
 
     const started = await startServer(
         config.value,
@@ -997,15 +1091,18 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
 
             if (url.pathname === "/") {
                 const importMapScript = `<script type="importmap">${JSON.stringify(importMap)}</script>`;
-                return new Response(createDevHtmlShell(importMapScript, mountId, appTitle), {
+                return new Response(createDevHtmlShell(importMapScript, currentState.mountId, currentState.appTitle), {
                     headers: { "Content-Type": "text/html" },
                 });
             }
 
             if (url.pathname === "/main.ts") {
-                return new Response(createBootstrapSource(createImportPath(rootDir, appComponentPath), mountId), {
+                return new Response(
+                    createBootstrapSource(createImportPath(rootDir, currentState.appComponentPath), currentState.mountId),
+                    {
                     headers: { "Content-Type": "application/javascript" },
-                });
+                    },
+                );
             }
 
             if (url.pathname === DEV_LIVE_RELOAD_PATH) {
@@ -1019,7 +1116,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
             }
 
             if (url.pathname.startsWith("/assets/")) {
-                if (assetsDir.value === undefined) {
+                if (currentState.assetsDir === undefined) {
                     return new Response("Not Found", { status: 404 });
                 }
 
@@ -1028,7 +1125,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                     return new Response("Not Found", { status: 404 });
                 }
 
-                const resolvedAssetPath = await resolvePhysicalAssetPath(assetsDir.value, requestedPath);
+                const resolvedAssetPath = await resolvePhysicalAssetPath(currentState.assetsDir, requestedPath);
                 if (!resolvedAssetPath.ok) {
                     return new Response("Not Found", { status: 404 });
                 }
@@ -1076,11 +1173,11 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                     return new Response("Not Found", { status: 404 });
                 }
 
-                if (!isPathInsideRoot(sourceRoot.value, resolvedSourcePath.value.resolvedPath)) {
+                if (!isPathInsideRoot(currentState.sourceRoot, resolvedSourcePath.value.resolvedPath)) {
                     return new Response("Not Found", { status: 404 });
                 }
 
-                const allowedSourceRoots = [realpathSync(sourceRoot.value)];
+                const allowedSourceRoots = [realpathSync(currentState.sourceRoot)];
                 const transpiled = await loadDevModule(
                     rootDir,
                     resolvedSourcePath.value.modulePath,
@@ -1102,11 +1199,11 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                     return new Response("Not Found", { status: 404 });
                 }
 
-                if (!isPathInsideRoot(sourceRoot.value, resolvedSourcePath.value.resolvedPath)) {
+                if (!isPathInsideRoot(currentState.sourceRoot, resolvedSourcePath.value.resolvedPath)) {
                     return new Response("Not Found", { status: 404 });
                 }
 
-                const allowedSourceRoots = [realpathSync(sourceRoot.value)];
+                const allowedSourceRoots = [realpathSync(currentState.sourceRoot)];
                 const source = await loadDevModule(
                     rootDir,
                     resolvedSourcePath.value.modulePath,
@@ -1128,7 +1225,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                     return new Response("Not Found", { status: 404 });
                 }
 
-                if (!isPathInsideRoot(sourceRoot.value, resolvedSourcePath.value.resolvedPath)) {
+                if (!isPathInsideRoot(currentState.sourceRoot, resolvedSourcePath.value.resolvedPath)) {
                     return new Response("Not Found", { status: 404 });
                 }
 
@@ -1136,7 +1233,7 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                     rootDir,
                     resolvedSourcePath.value.modulePath,
                     reloadHub.cache,
-                    [realpathSync(sourceRoot.value)],
+                    [realpathSync(currentState.sourceRoot)],
                 );
                 if (!compiled.ok) {
                     return createDevModuleErrorResponse(compiled.error);
@@ -1147,9 +1244,9 @@ export const runConfiguredDevServer = async (cwd = process.cwd()): Promise<Resul
                 });
             }
 
-            if (shouldServeDevAppShell(req.method, url.pathname, sourcePathPrefix)) {
+            if (shouldServeDevAppShell(req.method, url.pathname, currentState.sourcePathPrefix)) {
                 const importMapScript = `<script type="importmap">${JSON.stringify(importMap)}</script>`;
-                return new Response(createDevHtmlShell(importMapScript, mountId, appTitle), {
+                return new Response(createDevHtmlShell(importMapScript, currentState.mountId, currentState.appTitle), {
                     headers: { "Content-Type": "text/html" },
                 });
             }

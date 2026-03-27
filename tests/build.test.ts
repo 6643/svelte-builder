@@ -2443,6 +2443,67 @@ test("runConfiguredDevServer serves a generated bootstrap module without main.ts
     expect(source).not.toContain(')!');
     }));
 
+test("runConfiguredDevServer reloads updated JSON config for app shell and bootstrap", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-config-reload-live-"));
+    createdDirs.push(rootDir);
+
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    mkdirSync(join(rootDir, "routes"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+
+    writeFileSync(join(rootDir, "src", "App.svelte"), "<h1>before</h1>");
+    writeFileSync(join(rootDir, "routes", "Alt.svelte"), "<h1>after</h1>");
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ appComponent: "src/App.svelte", appTitle: "Before", mountId: "app", port: devPort }, null, 4),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    try {
+        const firstHtmlResponse = await fetch(`http://127.0.0.1:${result.value.port}/`);
+        const firstHtml = await firstHtmlResponse.text();
+        const firstBootstrapResponse = await fetch(`http://127.0.0.1:${result.value.port}/main.ts`);
+        const firstBootstrap = await firstBootstrapResponse.text();
+
+        expect(firstHtml).toContain("<title>Before</title>");
+        expect(firstHtml).toContain('<main id="app"></main>');
+        expect(firstBootstrap).toContain('import App from "./src/App.svelte"');
+        expect(firstBootstrap).toContain('document.getElementById("app")');
+
+        writeFileSync(
+            join(rootDir, "svelte-builder.config.json"),
+            JSON.stringify({ appComponent: "routes/Alt.svelte", appTitle: "After", mountId: "root", port: devPort }, null, 4),
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        const secondHtmlResponse = await fetch(`http://127.0.0.1:${result.value.port}/`);
+        const secondHtml = await secondHtmlResponse.text();
+        const secondBootstrapResponse = await fetch(`http://127.0.0.1:${result.value.port}/main.ts`);
+        const secondBootstrap = await secondBootstrapResponse.text();
+        const secondAppResponse = await fetch(`http://127.0.0.1:${result.value.port}/routes/Alt.svelte`);
+        const secondAppBody = await secondAppResponse.text();
+
+        expect(secondHtml).toContain("<title>After</title>");
+        expect(secondHtml).toContain('<main id="root"></main>');
+        expect(secondHtml).not.toContain("<title>Before</title>");
+        expect(secondBootstrap).toContain('import App from "./routes/Alt.svelte"');
+        expect(secondBootstrap).toContain('document.getElementById("root")');
+        expect(secondAppResponse.status).toBe(200);
+        expect(secondAppBody).toContain("after");
+    } finally {
+        await result.value.stop();
+    }
+    }));
+
 test("runConfiguredDevServer rewrites bare package imports and compiles symlinked package source modules", async () =>
     runSequentialDevTest(async () => {
     const devPort = await allocateFreePort();
