@@ -1215,6 +1215,43 @@ test("buildSvelte rejects absolute file path imports outside the app source tree
     expect(result.error).toContain("app source tree");
 });
 
+test("buildSvelte rejects dynamic import expressions that cannot be validated inside the app source tree", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dynamic-import-expression-"));
+    const outsideDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dynamic-import-expression-outside-"));
+    createdDirs.push(rootDir, outsideDir);
+
+    mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    const escapedImport = join(outsideDir, "escaped.js");
+
+    writeFileSync(
+        join(rootDir, "src", "app", "App.svelte"),
+        [
+            "<script>",
+            `  const target = ${JSON.stringify(escapedImport)};`,
+            "  import(target);",
+            "</script>",
+            "",
+            "<h1>dyn</h1>",
+        ].join("\n"),
+    );
+    writeFileSync(join(outsideDir, "escaped.js"), 'export const leaked = "outside-dynamic-import-js";');
+
+    const { buildSvelte } = await import("../src/index.ts");
+    const result = await buildSvelte({
+        appComponent: "src/app/App.svelte",
+        rootDir,
+    });
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        throw new Error("Expected buildSvelte to reject dynamic import expressions outside the app source tree");
+    }
+
+    expect(result.error).toContain("Dynamic import expressions");
+});
+
 test("buildSvelte rejects outDir that overlaps the broader source tree", async () => {
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-outdir-source-tree-"));
     createdDirs.push(rootDir);
@@ -3418,6 +3455,47 @@ test("runConfiguredDevServer rejects absolute file path imports outside the app 
     expect(result.error).toContain("app source tree");
     }));
 
+test("runConfiguredDevServer rejects dynamic import expressions that cannot be validated inside the app source tree", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-dynamic-import-expression-"));
+    const outsideDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-dynamic-import-expression-outside-"));
+    createdDirs.push(rootDir, outsideDir);
+
+    mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    const escapedImport = join(outsideDir, "escaped.js");
+
+    writeFileSync(
+        join(rootDir, "src", "app", "App.svelte"),
+        [
+            "<script>",
+            `  const target = ${JSON.stringify(escapedImport)};`,
+            "  import(target);",
+            "</script>",
+            "",
+            "<h1>dyn</h1>",
+        ].join("\n"),
+    );
+    writeFileSync(join(outsideDir, "escaped.js"), 'export const leaked = "outside-dynamic-import-js";');
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ appComponent: "src/app/App.svelte", port: devPort }, null, 4),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        await result.value.stop();
+        throw new Error("Expected runConfiguredDevServer to reject dynamic import expressions outside the app source tree");
+    }
+
+    expect(result.error).toContain("Dynamic import expressions");
+    }));
+
 test("runConfiguredDevServer rejects escaped relative imports introduced after startup", async () =>
     runSequentialDevTest(async () => {
     const devPort = await allocateFreePort();
@@ -3571,6 +3649,62 @@ test("runConfiguredDevServer rejects escaped relative imports introduced in Type
         expect(response.status).toBe(500);
         expect(response.body).toBe("Internal Server Error");
         expect(response.body).not.toContain("outside-hot-ts");
+    } finally {
+        await result.value.stop();
+    }
+    }));
+
+test("runConfiguredDevServer rejects dynamic import expressions introduced in JavaScript helpers after startup", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-runtime-dynamic-import-expression-"));
+    const outsideDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-runtime-dynamic-import-expression-outside-"));
+    createdDirs.push(rootDir, outsideDir);
+
+    mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    writeFileSync(join(rootDir, "src", "app", "helper.js"), 'export const helper = "safe";');
+    writeFileSync(
+        join(rootDir, "src", "app", "App.svelte"),
+        [
+            "<script>",
+            '  import { helper } from "./helper.js";',
+            "</script>",
+            "",
+            "<h1>{helper}</h1>",
+        ].join("\n"),
+    );
+    writeFileSync(join(outsideDir, "escaped.js"), 'export const leaked = "outside-dynamic-import-js";');
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ appComponent: "src/app/App.svelte", port: devPort }, null, 4),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    if (!result.ok) {
+        throw new Error(result.error);
+    }
+
+    try {
+        const escapedImport = join(outsideDir, "escaped.js");
+        writeFileSync(
+            join(rootDir, "src", "app", "helper.js"),
+            [
+                `const target = ${JSON.stringify(escapedImport)};`,
+                "import(target);",
+                'export const helper = "safe";',
+            ].join("\n"),
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 400));
+
+        const response = await requestDevServerPath(result.value.port, "/src/app/helper.js");
+
+        expect(response.status).toBe(500);
+        expect(response.body).toBe("Internal Server Error");
+        expect(response.body).not.toContain("outside-dynamic-import-js");
     } finally {
         await result.value.stop();
     }
