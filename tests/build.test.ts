@@ -1179,6 +1179,42 @@ test("buildSvelte rejects file URL imports outside the app source tree", async (
     expect(result.error).toContain("app source tree");
 });
 
+test("buildSvelte rejects absolute file path imports outside the app source tree", async () => {
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-absolute-file-import-"));
+    const outsideDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-absolute-file-import-outside-"));
+    createdDirs.push(rootDir, outsideDir);
+
+    mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    const escapedImport = join(outsideDir, "escaped.js");
+
+    writeFileSync(
+        join(rootDir, "src", "app", "App.svelte"),
+        [
+            "<script>",
+            `  import { leaked } from ${JSON.stringify(escapedImport)};`,
+            "</script>",
+            "",
+            "<h1>{leaked}</h1>",
+        ].join("\n"),
+    );
+    writeFileSync(join(outsideDir, "escaped.js"), 'export const leaked = "outside-absolute-js";');
+
+    const { buildSvelte } = await import("../src/index.ts");
+    const result = await buildSvelte({
+        appComponent: "src/app/App.svelte",
+        rootDir,
+    });
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        throw new Error("Expected buildSvelte to reject absolute file path imports outside the app source tree");
+    }
+
+    expect(result.error).toContain("app source tree");
+});
+
 test("buildSvelte rejects outDir that overlaps the broader source tree", async () => {
     const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-outdir-source-tree-"));
     createdDirs.push(rootDir);
@@ -3337,6 +3373,46 @@ test("runConfiguredDevServer rejects file URL imports outside the app source tre
     if (result.ok) {
         await result.value.stop();
         throw new Error("Expected runConfiguredDevServer to reject file URL imports outside the app source tree");
+    }
+
+    expect(result.error).toContain("app source tree");
+    }));
+
+test("runConfiguredDevServer rejects absolute file path imports outside the app source tree", async () =>
+    runSequentialDevTest(async () => {
+    const devPort = await allocateFreePort();
+    const rootDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-absolute-file-import-"));
+    const outsideDir = mkdtempSync(join(process.cwd(), ".tmp-bsb-dev-absolute-file-import-outside-"));
+    createdDirs.push(rootDir, outsideDir);
+
+    mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+    mkdirSync(join(rootDir, "assets"), { recursive: true });
+    const escapedImport = join(outsideDir, "escaped.js");
+
+    writeFileSync(
+        join(rootDir, "src", "app", "App.svelte"),
+        [
+            "<script>",
+            `  import { leaked } from ${JSON.stringify(escapedImport)};`,
+            "</script>",
+            "",
+            "<h1>{leaked}</h1>",
+        ].join("\n"),
+    );
+    writeFileSync(join(outsideDir, "escaped.js"), 'export const leaked = "outside-absolute-js";');
+    writeFileSync(
+        join(rootDir, "svelte-builder.config.json"),
+        JSON.stringify({ appComponent: "src/app/App.svelte", port: devPort }, null, 4),
+    );
+
+    const { runConfiguredDevServer } = await import("../src/index.ts");
+    const result = await runConfiguredDevServer(rootDir);
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+        await result.value.stop();
+        throw new Error("Expected runConfiguredDevServer to reject absolute file path imports outside the app source tree");
     }
 
     expect(result.error).toContain("app source tree");
