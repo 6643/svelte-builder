@@ -4070,6 +4070,62 @@ test("runConfiguredDevServer rejects unsupported local source module extensions 
     }
     }));
 
+test("runConfiguredDevServer rejects unsupported local source module extensions introduced in TypeScript helpers after startup", async () =>
+    runSequentialDevTest(async () => {
+    for (const extension of [".jsx", ".mts"] as const) {
+        const devPort = await allocateFreePort();
+        const rootDir = mkdtempSync(join(process.cwd(), `.tmp-bsb-dev-runtime-unsupported-ts-import-${extension.slice(1)}-`));
+        createdDirs.push(rootDir);
+
+        mkdirSync(join(rootDir, "src", "app"), { recursive: true });
+        mkdirSync(join(rootDir, "assets"), { recursive: true });
+        writeFileSync(join(rootDir, "src", "app", `other${extension}`), 'export const leaked = "inside-hot";');
+        writeFileSync(join(rootDir, "src", "app", "helper.ts"), 'export const helper = "safe";');
+        writeFileSync(
+            join(rootDir, "src", "app", "App.svelte"),
+            [
+                "<script>",
+                '  import { helper } from "./helper.ts";',
+                "</script>",
+                "",
+                "<h1>{helper}</h1>",
+            ].join("\n"),
+        );
+        writeFileSync(
+            join(rootDir, "svelte-builder.config.json"),
+            JSON.stringify({ appComponent: "src/app/App.svelte", port: devPort }, null, 4),
+        );
+
+        const { runConfiguredDevServer } = await import("../src/index.ts");
+        const result = await runConfiguredDevServer(rootDir);
+
+        if (!result.ok) {
+            throw new Error(result.error);
+        }
+
+        try {
+            writeFileSync(
+                join(rootDir, "src", "app", "helper.ts"),
+                [
+                    `import { leaked } from "./other${extension}";`,
+                    "export const helper = leaked;",
+                ].join("\n"),
+            );
+
+            await new Promise((resolve) => setTimeout(resolve, 400));
+
+            const response = await requestDevServerPath(result.value.port, "/src/app/helper.ts");
+
+            expect(response.status).toBe(500);
+            expect(response.body).toBe("Internal Server Error");
+            expect(response.body).not.toContain(`other${extension}`);
+            expect(response.body).not.toContain("inside-hot");
+        } finally {
+            await result.value.stop();
+        }
+    }
+    }));
+
 test("runConfiguredDevServer rejects escaped relative imports introduced in TypeScript helpers after startup", async () =>
     runSequentialDevTest(async () => {
     const devPort = await allocateFreePort();
